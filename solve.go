@@ -3,11 +3,13 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 )
 
 var entityIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document):[a-zA-Z0-9._]+`)
+var jiraIDPattern = regexp.MustCompile(`[A-Z]+-\d+`)
 
 var technicalPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`[A-Z][a-z]+(?:[A-Z][a-z]+)+`),            // CamelCase: HostedCluster, NodePool
@@ -78,7 +80,14 @@ func ExtractTechnicalTerms(text string) []string {
 	return terms
 }
 
-func Solve(model, graphPath, jiraText, conventions string) {
+func Solve(model, graphPath, jiraText, conventions string, forceSolve bool) {
+	if !forceSolve {
+		repoRoot := detectRepoRoot(graphPath)
+		if repoRoot != "" && checkExistingFix(jiraText, repoRoot) {
+			return
+		}
+	}
+
 	fmt.Fprintln(os.Stderr, "--- Extracting technical terms ---")
 	terms := ExtractTechnicalTerms(jiraText)
 
@@ -154,6 +163,45 @@ func Solve(model, graphPath, jiraText, conventions string) {
 	if err := AskOllamaStream(model, prompt); err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
 	}
+}
+
+func checkExistingFix(jiraText, repoRoot string) bool {
+	ids := jiraIDPattern.FindAllString(jiraText, -1)
+	if len(ids) == 0 {
+		return false
+	}
+
+	seen := make(map[string]bool)
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+
+		fmt.Fprintf(os.Stderr, "--- Checking git history for %s ---\n", id)
+
+		cmd := exec.Command("git", "log", "--all", "--oneline", "--grep="+id)
+		cmd.Dir = repoRoot
+		out, err := cmd.Output()
+		if err == nil && len(out) > 0 {
+			lines := strings.TrimSpace(string(out))
+			fmt.Printf("## Existing fix found for %s\n\n", id)
+			fmt.Printf("Git commits referencing this JIRA:\n```\n%s\n```\n\n", lines)
+
+			cmd = exec.Command("gh", "pr", "list", "--repo=openshift/hypershift", "--search="+id, "--state=merged", "--limit=5", "--json=number,title,mergedAt,url")
+			cmd.Dir = repoRoot
+			prOut, prErr := cmd.Output()
+			if prErr == nil && len(prOut) > 3 {
+				fmt.Printf("Merged PRs:\n```\n%s\n```\n\n", strings.TrimSpace(string(prOut)))
+			}
+
+			fmt.Println("**This JIRA appears to have an existing fix. Review the commits/PRs above before generating a new solution.**")
+			fmt.Println("Run with `--force-solve` to skip this check and generate a solution anyway.")
+			return true
+		}
+	}
+
+	return false
 }
 
 func expandRelatedEntities(graphPath string, searchedTerms []string, atlasData *strings.Builder) {

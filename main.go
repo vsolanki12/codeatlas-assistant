@@ -17,6 +17,7 @@ func main() {
 	generate := flag.String("generate", "", "generate Go code (describe what to write)")
 	styleFile := flag.String("style-file", "", "Go file to use as style reference (auto-detect if empty)")
 	conventionsFile := flag.String("conventions", "", "conventions file (embedded default if empty)")
+	forceSolve := flag.Bool("force-solve", false, "skip existing fix check in solve mode")
 	flag.Parse()
 
 	resolvedModel, err := resolveModel(*model)
@@ -33,12 +34,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error reading file: %v\n", err)
 			os.Exit(1)
 		}
-		Solve(resolvedModel, *graphPath, string(data), conventions)
+		Solve(resolvedModel, *graphPath, string(data), conventions, *forceSolve)
 		return
 	}
 
 	if *solve != "" {
-		Solve(resolvedModel, *graphPath, *solve, conventions)
+		Solve(resolvedModel, *graphPath, *solve, conventions, *forceSolve)
 		return
 	}
 
@@ -130,7 +131,7 @@ func runREPL(model, graphPath, conventions string) {
 		if strings.HasPrefix(input, "solve:") {
 			jiraText := strings.TrimSpace(strings.TrimPrefix(input, "solve:"))
 			if jiraText != "" {
-				Solve(model, graphPath, jiraText, conventions)
+				Solve(model, graphPath, jiraText, conventions, false)
 			}
 		} else if strings.HasPrefix(input, "gen:") {
 			desc := strings.TrimSpace(strings.TrimPrefix(input, "gen:"))
