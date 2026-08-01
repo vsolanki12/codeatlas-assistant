@@ -116,7 +116,7 @@ func main() {
 	handleQuestion(a, llm, question)
 }
 
-var preferredModels = []string{"qwen3:14b", "qwen3:8b", "qwen2.5-coder:14b"}
+var preferredModels = []string{"qwen3:30b", "qwen3:14b", "qwen3:8b", "qwen2.5-coder:14b"}
 
 func resolveModel(model string) (string, error) {
 	if model != "" {
