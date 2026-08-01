@@ -21,6 +21,7 @@ type SolveData struct {
 	AtlasData   string
 	Conventions string
 	StyleCode   string
+	APITypes    string
 }
 
 type ControllerEntry struct {
@@ -44,6 +45,7 @@ type ClaudeData struct {
 	WorkloadController string
 	RepoFiles          string
 	Framework          *FrameworkInfo
+	APITypes           string
 }
 
 type GenerateData struct {
@@ -60,12 +62,13 @@ func BuildAsk(question, atlasOutput string) string {
 	})
 }
 
-func BuildSolve(jiraText, atlasData, conventions, styleCode string) string {
+func BuildSolve(jiraText, atlasData, conventions, styleCode, apiTypes string) string {
 	return execute("solve.tmpl", SolveData{
 		JiraText:    jiraText,
 		AtlasData:   atlasData,
 		Conventions: conventions,
 		StyleCode:   styleCode,
+		APITypes:    apiTypes,
 	})
 }
 
@@ -78,7 +81,7 @@ func BuildGenerate(description, atlasData, styleCode, conventions string) string
 	})
 }
 
-func BuildClaude(jiraText, atlasData, conventions, styleCode, repoFiles string, framework *FrameworkInfo, controllers []ControllerEntry) string {
+func BuildClaude(jiraText, atlasData, conventions, styleCode, repoFiles, apiTypes string, framework *FrameworkInfo, controllers []ControllerEntry) string {
 	workload := ""
 	for _, c := range controllers {
 		if c.Role == "workload" {
@@ -95,6 +98,7 @@ func BuildClaude(jiraText, atlasData, conventions, styleCode, repoFiles string, 
 		WorkloadController: workload,
 		RepoFiles:          repoFiles,
 		Framework:          framework,
+		APITypes:           apiTypes,
 	})
 }
 

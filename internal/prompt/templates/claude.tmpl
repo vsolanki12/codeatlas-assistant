@@ -104,6 +104,15 @@ Implement the smallest possible change to resolve this JIRA.
 - Generate the patch
 </task>
 
+{{- if .APITypes}}
+
+## Existing API Type Definitions (from repo — follow these patterns exactly)
+When proposing new types or modifying existing ones, match the style and structure shown here.
+```go
+{{.APITypes}}
+```
+{{- end}}
+
 ## CodeAtlas Architecture Data (focused on workload controller)
 {{.AtlasData}}
 {{- if .Conventions}}

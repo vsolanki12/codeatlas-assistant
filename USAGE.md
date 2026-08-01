@@ -104,11 +104,21 @@ No Claude tokens consumed until you paste the output. Everything runs locally vi
 ./assistant --graph ~/codeatlas/hypershift-graph.json --claude-file jira-description.txt
 ```
 
+**With `--repo`** (recommended): Scans the source repo for API type definitions matching
+JIRA terms. The LLM sees existing struct shapes (e.g., `OperatorConfiguration` with its
+typed per-component fields) and follows the pattern instead of guessing.
+
+```bash
+./assistant --graph ~/codeatlas/hypershift-graph.json --claude-file jira.txt --repo ~/hypershift
+```
+
 **Dual output:**
 - **Screen** — human-readable engineering analysis (streamed via Ollama)
 - **File** — distilled XML prompt for Claude (saved to `<input>-claude.xml`)
 
 The local LLM distills ~40K of raw atlas data into a compact structured prompt (~3-5K).
+When `--repo` is provided, API type definitions from the repo are included so the LLM
+proposes changes that match existing code patterns (typed structs vs maps, field naming, etc.).
 XML sections include `<jira>`, `<architecture>`, `<files>`, `<functions>`, `<tests>`,
 `<constraints>`, and `<task>`.
 

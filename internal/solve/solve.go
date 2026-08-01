@@ -32,7 +32,7 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions string, forceSolv
 	}
 
 	fmt.Fprintln(os.Stderr, "--- Generating solution ---")
-	p := prompt.BuildSolve(jiraText, atlasData, conventions, result.StyleCode)
+	p := prompt.BuildSolve(jiraText, atlasData, conventions, result.StyleCode, "")
 
 	if err := llm.Generate(p); err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)

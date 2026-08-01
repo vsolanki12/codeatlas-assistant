@@ -34,4 +34,12 @@ Follow the engineering conventions exactly — feature gates, enum types, testin
 ```
 {{- end}}
 
+{{- if .APITypes}}
+
+## Existing API Type Definitions (follow these patterns)
+```go
+{{.APITypes}}
+```
+{{- end}}
+
 ## Solution
