@@ -23,12 +23,19 @@ type SolveData struct {
 	StyleCode   string
 }
 
+type ControllerEntry struct {
+	ID   string
+	File string
+	Role string
+}
+
 type ClaudeData struct {
-	JiraText    string
-	AtlasData   string
-	Conventions string
-	StyleCode   string
-	Controllers []string
+	JiraText          string
+	AtlasData         string
+	Conventions       string
+	StyleCode         string
+	Controllers       []ControllerEntry
+	WorkloadController string
 }
 
 type GenerateData struct {
@@ -63,13 +70,21 @@ func BuildGenerate(description, atlasData, styleCode, conventions string) string
 	})
 }
 
-func BuildClaude(jiraText, atlasData, conventions, styleCode string, controllers []string) string {
+func BuildClaude(jiraText, atlasData, conventions, styleCode string, controllers []ControllerEntry) string {
+	workload := ""
+	for _, c := range controllers {
+		if c.Role == "workload" {
+			workload = c.ID
+			break
+		}
+	}
 	return execute("claude.tmpl", ClaudeData{
-		JiraText:    jiraText,
-		AtlasData:   atlasData,
-		Conventions: conventions,
-		StyleCode:   styleCode,
-		Controllers: controllers,
+		JiraText:          jiraText,
+		AtlasData:         atlasData,
+		Conventions:       conventions,
+		StyleCode:         styleCode,
+		Controllers:       controllers,
+		WorkloadController: workload,
 	})
 }
 

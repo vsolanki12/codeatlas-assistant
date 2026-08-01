@@ -2,49 +2,49 @@ You are an engineering assistant preparing a structured implementation prompt fo
 
 ## JIRA Description
 {{.JiraText}}
+
+## Controller Analysis (deterministic — DO NOT override)
+{{- if .WorkloadController}}
+
+WORKLOAD CONTROLLER (implementation point): {{.WorkloadController}}
+This controller was identified by file path analysis as the one that creates/modifies actual workloads (Deployments, StatefulSets, container args). Your <architecture> section MUST use this controller as the implementation point.
+{{- end}}
 {{- if .Controllers}}
 
-## IMPORTANT: Discovered Controllers
-These controllers were found in the codebase for this JIRA. You MUST choose the correct one:
+All discovered controllers:
 {{- range .Controllers}}
-- {{.}}
+- {{.ID}} | {{.File}} | role: {{.Role}}
+{{- end}}
 {{- end}}
 
-RULE: The implementation point is in the controller that creates/modifies the actual workload (Deployment, StatefulSet, container args, component flags). This is usually the "downstream" or "workload" controller, NOT the controller that reconciles the user-facing CR. If the JIRA mentions a component managed by the Control Plane Operator, look for controllers under control-plane-operator/, not hypershift-operator/.
-{{- end}}
-
-Given the JIRA description and CodeAtlas architecture data below, produce a Claude-optimized implementation prompt using XML tags.
-
-Your output must follow this EXACT structure — no extra text before or after:
+Produce a Claude-optimized implementation prompt using this EXACT XML structure — no extra text before or after:
 
 <jira>
 Copy the JIRA description verbatim.
 </jira>
 
 <architecture>
-Distill the atlas data into:
-- API Controller: which controller reconciles the CR where the user sets this config
-- Workload Controller: which controller creates the actual Deployment/StatefulSet/DaemonSet for the affected component — this is usually the correct implementation point
-- If these are DIFFERENT controllers, the implementation point is in the workload controller (the one that renders container args, volumes, env vars)
-- Implementation Point: the specific function to modify — must be from the workload controller
-- Reason: why this is the right entry point — "it reconciles the CR" is NOT sufficient; explain what the function actually creates or modifies
+{{- if .WorkloadController}}
+- Workload Controller: {{.WorkloadController}} (LOCKED — do not change this)
+{{- end}}
+- API Controller: the controller that reconciles the user-facing CR (if different from workload controller)
+- Implementation Point: a specific function in the WORKLOAD controller to modify
+- Reason: what this function creates or modifies (not just "it reconciles")
 - Call Chain: how execution reaches this point
 </architecture>
 
 <files>
-List ONLY the files Claude needs to read, one per line, with a reason.
-Files must come from the WORKLOAD controller, not the API controller.
+List ONLY files from the WORKLOAD controller directory, one per line:
 - path/to/file.go — reason
 </files>
 
 <functions>
-List the specific functions Claude will modify or reference:
+List functions to modify in the WORKLOAD controller:
 - FunctionName — what it does
 </functions>
 
 <tests>
-List existing test files and what new tests are needed:
-- Existing: path/to/test.go
+- Existing: path/to/test.go (from workload controller directory)
 - Needed: describe what to test
 </tests>
 
@@ -62,18 +62,14 @@ List existing test files and what new tests are needed:
 
 <task>
 Implement the smallest possible change to resolve this JIRA.
-
-Before writing code:
-1. From the Discovered Controllers list, identify which is the API controller and which is the workload controller
-2. The workload controller (the one that renders container spec / deployment args) is the implementation point
-3. Explain your reasoning — if the API controller just passes config to another controller, the change belongs downstream
-4. Explain any side effects
-5. Then generate the patch
-
-Read ONLY the files listed in <files>. Do not search unrelated files unless absolutely necessary.
+The implementation point is in the WORKLOAD controller listed above.
+1. Explain what the workload controller creates/modifies for this component
+2. Identify the specific function that renders the container spec or component config
+3. Explain any side effects
+4. Generate the patch
 </task>
 
-## CodeAtlas Architecture Data
+## CodeAtlas Architecture Data (focused on workload controller)
 {{.AtlasData}}
 {{- if .Conventions}}
 
@@ -88,4 +84,4 @@ Read ONLY the files listed in <files>. Do not search unrelated files unless abso
 ```
 {{- end}}
 
-Now produce the Claude implementation prompt using the XML structure above.
+Now produce the Claude implementation prompt. Remember: the workload controller is LOCKED — use it as the implementation point.

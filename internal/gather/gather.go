@@ -13,13 +13,19 @@ import (
 
 var entityIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document):[a-zA-Z0-9._]+`)
 var crdIDPattern = regexp.MustCompile(`crd:[a-zA-Z0-9._]+`)
-var controllerIDPattern = regexp.MustCompile(`controller:[a-zA-Z0-9._]+`)
+var controllerWithPathPattern = regexp.MustCompile(`(controller:[a-zA-Z0-9._]+)\s*\|\s*([^\s|]+)`)
+
+type ControllerInfo struct {
+	ID   string
+	File string
+	Role string // "workload" or "api"
+}
 
 type Result struct {
 	AtlasData   string
 	StyleCode   string
 	Terms       []string
-	Controllers []string
+	Controllers []ControllerInfo
 }
 
 func FromJIRA(a atlas.Runner, jiraText string) Result {
@@ -98,17 +104,23 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 	}
 }
 
-func extractControllers(data string) []string {
-	ids := controllerIDPattern.FindAllString(data, -1)
+func extractControllers(data string) []ControllerInfo {
+	matches := controllerWithPathPattern.FindAllStringSubmatch(data, -1)
 	seen := make(map[string]bool)
-	var unique []string
-	for _, id := range ids {
-		if !seen[id] {
-			seen[id] = true
-			unique = append(unique, id)
+	var controllers []ControllerInfo
+	for _, m := range matches {
+		id, file := m[1], m[2]
+		if seen[id] {
+			continue
 		}
+		seen[id] = true
+		role := "api"
+		if strings.Contains(file, "control-plane-operator/") {
+			role = "workload"
+		}
+		controllers = append(controllers, ControllerInfo{ID: id, File: file, Role: role})
 	}
-	return unique
+	return controllers
 }
 
 func discoverControllers(a atlas.Runner, atlasData *strings.Builder) {
