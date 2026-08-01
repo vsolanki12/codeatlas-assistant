@@ -132,6 +132,18 @@ CodeAtlas Assistant (type 'exit' to quit)
 | stats | stats, statistics, count, how many, overview |
 | ask (default) | anything else — uses atlas ask with fuzzy entity matching |
 
+## Conventions File
+
+The tool embeds a `conventions.md` with HyperShift domain knowledge (feature gates, API design,
+8 control plane components, testing patterns, directory structure). This is injected into solve
+and generate prompts automatically.
+
+Override with a custom conventions file for other projects:
+
+```bash
+./assistant --conventions ~/my-project/conventions.md --graph graph.json --solve "bug description"
+```
+
 ## Flags
 
 | Flag | Default | Description |
@@ -143,3 +155,4 @@ CodeAtlas Assistant (type 'exit' to quit)
 | `--solve-file` | — | Path to file containing JIRA description |
 | `--generate` | — | Description of Go code to generate |
 | `--style-file` | auto-detect | Go file to use as style reference |
+| `--conventions` | embedded | Conventions file for domain knowledge |
