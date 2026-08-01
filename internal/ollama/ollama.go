@@ -1,4 +1,4 @@
-package main
+package ollama
 
 import (
 	"bufio"
@@ -11,18 +11,26 @@ import (
 	"time"
 )
 
-type OllamaRequest struct {
+type LLM interface {
+	Generate(prompt string) error
+}
+
+type Client struct {
+	Model string
+}
+
+type request struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
 	Stream bool   `json:"stream"`
 }
 
-type OllamaResponse struct {
+type response struct {
 	Response string `json:"response"`
 	Done     bool   `json:"done"`
 }
 
-type OllamaTagsResponse struct {
+type tagsResponse struct {
 	Models []struct {
 		Name string `json:"name"`
 	} `json:"models"`
@@ -40,7 +48,7 @@ func ListModels() ([]string, error) {
 		return nil, err
 	}
 
-	var tags OllamaTagsResponse
+	var tags tagsResponse
 	if err := json.Unmarshal(data, &tags); err != nil {
 		return nil, err
 	}
@@ -52,9 +60,9 @@ func ListModels() ([]string, error) {
 	return models, nil
 }
 
-func AskOllamaStream(model string, prompt string) error {
-	req := OllamaRequest{
-		Model:  model,
+func (c *Client) Generate(prompt string) error {
+	req := request{
+		Model:  c.Model,
 		Prompt: prompt,
 		Stream: true,
 	}
@@ -80,7 +88,7 @@ func AskOllamaStream(model string, prompt string) error {
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 	for scanner.Scan() {
-		var chunk OllamaResponse
+		var chunk response
 		if err := json.Unmarshal(scanner.Bytes(), &chunk); err != nil {
 			continue
 		}

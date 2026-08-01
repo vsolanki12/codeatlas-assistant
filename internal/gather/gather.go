@@ -1,0 +1,145 @@
+package gather
+
+import (
+	"fmt"
+	"os"
+	"regexp"
+	"strings"
+
+	"github.com/vsolanki12/codeatlas-assistant/internal/atlas"
+	"github.com/vsolanki12/codeatlas-assistant/internal/intent"
+	"github.com/vsolanki12/codeatlas-assistant/internal/style"
+)
+
+var entityIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document):[a-zA-Z0-9._]+`)
+
+type Result struct {
+	AtlasData string
+	StyleCode string
+	Terms     []string
+}
+
+func FromJIRA(a atlas.Runner, jiraText string) Result {
+	fmt.Fprintln(os.Stderr, "--- Extracting technical terms ---")
+	terms := intent.ExtractTechnicalTerms(jiraText)
+
+	if len(terms) == 0 {
+		fmt.Fprintln(os.Stderr, "no technical terms found in JIRA text")
+		return Result{}
+	}
+
+	if len(terms) > 8 {
+		terms = terms[:8]
+	}
+
+	fmt.Fprintf(os.Stderr, "terms: %s\n", strings.Join(terms, ", "))
+
+	fmt.Fprintln(os.Stderr, "--- Searching atlas ---")
+	var atlasData strings.Builder
+
+	for _, term := range terms {
+		result, err := a.Run("search", term)
+		if err != nil || strings.Contains(result, "No matching") {
+			continue
+		}
+		atlasData.WriteString(fmt.Sprintf("### Search: %s\n%s\n", term, result))
+	}
+
+	if atlasData.Len() == 0 {
+		return Result{Terms: terms}
+	}
+
+	deepDiveCount := 3
+	if len(terms) < deepDiveCount {
+		deepDiveCount = len(terms)
+	}
+
+	for i := 0; i < deepDiveCount; i++ {
+		term := terms[i]
+		fmt.Fprintf(os.Stderr, "--- Deep dive: %s ---\n", term)
+
+		explainResult, err := a.Run("explain", term)
+		if err == nil && !strings.Contains(explainResult, "not found") {
+			atlasData.WriteString(fmt.Sprintf("### Explain: %s\n%s\n", term, explainResult))
+		}
+
+		investigateResult, err := a.Run("investigate", term)
+		if err == nil && !strings.Contains(investigateResult, "not found") {
+			atlasData.WriteString(fmt.Sprintf("### Investigate: %s\n%s\n", term, investigateResult))
+		}
+	}
+
+	expandRelatedEntities(a, terms, &atlasData)
+
+	if atlasData.Len() > 40000 {
+		fmt.Fprintf(os.Stderr, "atlas data: %d chars (capped to 40000)\n", atlasData.Len())
+		truncated := atlasData.String()[:40000]
+		atlasData.Reset()
+		atlasData.WriteString(truncated)
+		atlasData.WriteString("\n... (truncated)\n")
+	}
+
+	styleCode := style.LoadReference("", atlasData.String(), a.GraphPath())
+	if styleCode != "" {
+		fmt.Fprintln(os.Stderr, "--- Style reference loaded ---")
+	}
+
+	return Result{
+		AtlasData: atlasData.String(),
+		StyleCode: styleCode,
+		Terms:     terms,
+	}
+}
+
+func expandRelatedEntities(a atlas.Runner, searchedTerms []string, atlasData *strings.Builder) {
+	collected := atlasData.String()
+	entityIDs := entityIDPattern.FindAllString(collected, -1)
+	if len(entityIDs) == 0 {
+		return
+	}
+
+	searched := make(map[string]bool)
+	for _, t := range searchedTerms {
+		searched[strings.ToLower(t)] = true
+	}
+
+	codeKinds := map[string]bool{"controller": true, "function": true, "crd": true}
+
+	var novel []string
+	seen := make(map[string]bool)
+	for _, id := range entityIDs {
+		if seen[id] || searched[strings.ToLower(id)] {
+			continue
+		}
+		seen[id] = true
+		parts := strings.SplitN(id, ":", 2)
+		if len(parts) != 2 || !codeKinds[parts[0]] || searched[strings.ToLower(parts[1])] {
+			continue
+		}
+		novel = append(novel, id)
+	}
+
+	if len(novel) == 0 {
+		return
+	}
+
+	if len(novel) > 5 {
+		novel = novel[:5]
+	}
+
+	fmt.Fprintf(os.Stderr, "--- Expanding %d related entities ---\n", len(novel))
+	for _, id := range novel {
+		parts := strings.SplitN(id, ":", 2)
+		name := parts[1]
+		if idx := strings.LastIndex(name, "."); idx != -1 {
+			name = name[idx+1:]
+		}
+
+		result, err := a.Run("investigate", name)
+		if err != nil || strings.Contains(result, "not found") {
+			continue
+		}
+		atlasData.WriteString(fmt.Sprintf("### Related: %s\n%s\n", id, result))
+		fmt.Fprintf(os.Stderr, "  expanded: %s\n", id)
+	}
+}
