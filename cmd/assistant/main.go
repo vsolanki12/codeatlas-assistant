@@ -32,7 +32,8 @@ func main() {
 	forceSolve := flag.Bool("force-solve", false, "skip existing fix check in solve mode")
 	flag.Parse()
 
-	resolvedModel, err := resolveModel(*model)
+	heavy := *claudeFile != "" || *solveFile != "" || *solveFlag != "" || *generateFlag != ""
+	resolvedModel, err := resolveModel(*model, heavy)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -69,7 +70,7 @@ func main() {
 			}
 			claude.Run(a, llm, string(data), conventions, out, *repoPath)
 		} else {
-			solve.Run(a, llm, string(data), conventions, *forceSolve)
+			solve.Run(a, llm, string(data), conventions, *forceSolve, *repoPath)
 		}
 		return
 	}
@@ -82,7 +83,7 @@ func main() {
 			}
 			claude.Run(a, llm, *solveFlag, conventions, out, *repoPath)
 		} else {
-			solve.Run(a, llm, *solveFlag, conventions, *forceSolve)
+			solve.Run(a, llm, *solveFlag, conventions, *forceSolve, *repoPath)
 		}
 		return
 	}
@@ -116,9 +117,10 @@ func main() {
 	handleQuestion(a, llm, question)
 }
 
-var preferredModels = []string{"qwen3:30b", "qwen3:14b", "qwen3:8b", "qwen2.5-coder:14b"}
+var heavyModels = []string{"qwen3:30b", "qwen3:14b", "qwen3:8b", "qwen2.5-coder:14b"}
+var lightModels = []string{"qwen2.5-coder:14b", "qwen3:14b", "qwen3:8b", "qwen3:30b"}
 
-func resolveModel(model string) (string, error) {
+func resolveModel(model string, heavy bool) (string, error) {
 	if model != "" {
 		return model, nil
 	}
@@ -131,13 +133,22 @@ func resolveModel(model string) (string, error) {
 		return "", fmt.Errorf("no ollama models installed — run: ollama pull qwen3:14b")
 	}
 
+	preferred := lightModels
+	if heavy {
+		preferred = heavyModels
+	}
+
 	available := make(map[string]bool, len(models))
 	for _, m := range models {
 		available[m] = true
 	}
-	for _, pref := range preferredModels {
+	for _, pref := range preferred {
 		if available[pref] {
-			fmt.Fprintf(os.Stderr, "using model: %s\n", pref)
+			kind := "light"
+			if heavy {
+				kind = "heavy"
+			}
+			fmt.Fprintf(os.Stderr, "using model: %s (%s task)\n", pref, kind)
 			return pref, nil
 		}
 	}
@@ -210,7 +221,7 @@ func runREPL(a atlas.Runner, llm ollama.LLM, conventions string) {
 		if strings.HasPrefix(input, "solve:") {
 			jiraText := strings.TrimSpace(strings.TrimPrefix(input, "solve:"))
 			if jiraText != "" {
-				solve.Run(a, llm, jiraText, conventions, false)
+				solve.Run(a, llm, jiraText, conventions, false, "")
 			}
 		} else if strings.HasPrefix(input, "claude:") {
 			jiraText := strings.TrimSpace(strings.TrimPrefix(input, "claude:"))

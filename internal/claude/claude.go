@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -71,7 +72,8 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 	}
 
 	fmt.Fprintln(os.Stderr, "--- Generating solution ---")
-	p := prompt.BuildSolve(jiraText, atlasData, conventions, result.StyleCode, apiTypes)
+	solveFiles := filterRepoTree(repoFiles, atlasData)
+	p := prompt.BuildSolve(jiraText, atlasData, conventions, result.StyleCode, apiTypes, solveFiles)
 	if err := llm.Generate(p); err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
 	}
@@ -272,6 +274,36 @@ func DefaultOutputName(inputFile string) string {
 	ext := filepath.Ext(base)
 	name := strings.TrimSuffix(base, ext)
 	return name + "-claude.xml"
+}
+
+var goPathPattern = regexp.MustCompile(`(?:^|[\s(])([a-zA-Z][\w/.-]*\.go)`)
+
+func filterRepoTree(fullTree, atlasData string) string {
+	dirs := make(map[string]bool)
+	for _, match := range goPathPattern.FindAllStringSubmatch(atlasData, -1) {
+		dir := filepath.Dir(match[1])
+		for dir != "." && dir != "" {
+			dirs[dir] = true
+			dir = filepath.Dir(dir)
+		}
+	}
+
+	if len(dirs) == 0 {
+		return fullTree
+	}
+
+	var filtered []string
+	for _, line := range strings.Split(fullTree, "\n") {
+		if line == "" {
+			continue
+		}
+		dir := filepath.Dir(line)
+		if dirs[dir] {
+			filtered = append(filtered, line)
+		}
+	}
+
+	return strings.Join(filtered, "\n")
 }
 
 func parseReconciles(data string) string {

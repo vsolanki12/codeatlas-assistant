@@ -8,16 +8,26 @@ Using the JIRA description, CodeAtlas architecture data, engineering conventions
 5. **Tests**: What tests exist, what new tests are needed (follow the testing conventions)
 
 CRITICAL RULES:
-- ONLY reference files, functions, and paths that appear in the CodeAtlas data below. NEVER invent or guess file paths.
+- ONLY reference files, functions, and paths that appear in the CodeAtlas data or Repository File Tree below. NEVER invent or guess file paths.
 - If the atlas data does not contain a relevant file or function, say "not found in atlas data" instead of fabricating a path.
 - Anchor your fix to specific entity IDs and file:line references from the atlas output.
 - When proposing code changes, show modifications to the actual functions found in the atlas data.
+- When suggesting new files, verify the parent directory exists in the Repository File Tree.
 
 Be specific. Reference actual controller names, function names, and file paths from the atlas data.
 Follow the engineering conventions exactly — feature gates, enum types, testing patterns.
 
 ## JIRA Description
 {{.JiraText}}
+{{- if .RepoFiles}}
+
+## Repository File Tree (real files — use ONLY these paths)
+The following files exist in the repository. When listing files, pick ONLY from this list.
+Do NOT invent or guess file paths.
+```
+{{.RepoFiles}}
+```
+{{- end}}
 
 ## CodeAtlas Architecture Data
 {{.AtlasData}}

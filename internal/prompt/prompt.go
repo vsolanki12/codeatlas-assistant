@@ -22,6 +22,7 @@ type SolveData struct {
 	Conventions string
 	StyleCode   string
 	APITypes    string
+	RepoFiles   string
 }
 
 type ControllerEntry struct {
@@ -62,13 +63,14 @@ func BuildAsk(question, atlasOutput string) string {
 	})
 }
 
-func BuildSolve(jiraText, atlasData, conventions, styleCode, apiTypes string) string {
+func BuildSolve(jiraText, atlasData, conventions, styleCode, apiTypes, repoFiles string) string {
 	return execute("solve.tmpl", SolveData{
 		JiraText:    jiraText,
 		AtlasData:   atlasData,
 		Conventions: conventions,
 		StyleCode:   styleCode,
 		APITypes:    apiTypes,
+		RepoFiles:   repoFiles,
 	})
 }
 

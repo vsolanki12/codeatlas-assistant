@@ -76,7 +76,7 @@ func (c *Client) Generate(prompt string) error {
 
 	fmt.Fprintf(os.Stderr, "prompt size: %d chars\n", len(prompt))
 
-	client := &http.Client{Timeout: 10 * time.Minute}
+	client := &http.Client{Timeout: 30 * time.Minute}
 	resp, err := client.Post(
 		"http://localhost:11434/api/generate",
 		"application/json",
@@ -118,7 +118,7 @@ func (c *Client) GenerateString(prompt string) (string, error) {
 
 	fmt.Fprintf(os.Stderr, "prompt size: %d chars\n", len(prompt))
 
-	client := &http.Client{Timeout: 10 * time.Minute}
+	client := &http.Client{Timeout: 30 * time.Minute}
 	resp, err := client.Post(
 		"http://localhost:11434/api/generate",
 		"application/json",
