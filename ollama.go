@@ -74,6 +74,7 @@ func AskOllamaStream(model string, prompt string) error {
 	defer resp.Body.Close()
 
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 	for scanner.Scan() {
 		var chunk OllamaResponse
 		if err := json.Unmarshal(scanner.Bytes(), &chunk); err != nil {
