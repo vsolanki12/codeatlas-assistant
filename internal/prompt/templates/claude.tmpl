@@ -1,5 +1,18 @@
 You are an engineering assistant preparing a structured implementation prompt for Claude Code.
 
+## JIRA Description
+{{.JiraText}}
+{{- if .Controllers}}
+
+## IMPORTANT: Discovered Controllers
+These controllers were found in the codebase for this JIRA. You MUST choose the correct one:
+{{- range .Controllers}}
+- {{.}}
+{{- end}}
+
+RULE: The implementation point is in the controller that creates/modifies the actual workload (Deployment, StatefulSet, container args, component flags). This is usually the "downstream" or "workload" controller, NOT the controller that reconciles the user-facing CR. If the JIRA mentions a component managed by the Control Plane Operator, look for controllers under control-plane-operator/, not hypershift-operator/.
+{{- end}}
+
 Given the JIRA description and CodeAtlas architecture data below, produce a Claude-optimized implementation prompt using XML tags.
 
 Your output must follow this EXACT structure — no extra text before or after:
@@ -13,13 +26,14 @@ Distill the atlas data into:
 - API Controller: which controller reconciles the CR where the user sets this config
 - Workload Controller: which controller creates the actual Deployment/StatefulSet/DaemonSet for the affected component — this is usually the correct implementation point
 - If these are DIFFERENT controllers, the implementation point is in the workload controller (the one that renders container args, volumes, env vars)
-- Implementation Point: the specific function to modify
+- Implementation Point: the specific function to modify — must be from the workload controller
 - Reason: why this is the right entry point — "it reconciles the CR" is NOT sufficient; explain what the function actually creates or modifies
 - Call Chain: how execution reaches this point
 </architecture>
 
 <files>
-List ONLY the files Claude needs to read, one per line, with a reason:
+List ONLY the files Claude needs to read, one per line, with a reason.
+Files must come from the WORKLOAD controller, not the API controller.
 - path/to/file.go — reason
 </files>
 
@@ -50,17 +64,14 @@ List existing test files and what new tests are needed:
 Implement the smallest possible change to resolve this JIRA.
 
 Before writing code:
-1. Identify ALL controllers that touch the affected resource (API owner vs workload creator)
-2. Determine which controller actually renders the container spec, deployment args, or component config
-3. Explain your reasoning for choosing the implementation point — if the API controller just passes config through to another controller, the change belongs in the downstream controller
+1. From the Discovered Controllers list, identify which is the API controller and which is the workload controller
+2. The workload controller (the one that renders container spec / deployment args) is the implementation point
+3. Explain your reasoning — if the API controller just passes config to another controller, the change belongs downstream
 4. Explain any side effects
 5. Then generate the patch
 
 Read ONLY the files listed in <files>. Do not search unrelated files unless absolutely necessary.
 </task>
-
-## JIRA Description
-{{.JiraText}}
 
 ## CodeAtlas Architecture Data
 {{.AtlasData}}

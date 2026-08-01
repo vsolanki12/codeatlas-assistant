@@ -13,11 +13,13 @@ import (
 
 var entityIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document):[a-zA-Z0-9._]+`)
 var crdIDPattern = regexp.MustCompile(`crd:[a-zA-Z0-9._]+`)
+var controllerIDPattern = regexp.MustCompile(`controller:[a-zA-Z0-9._]+`)
 
 type Result struct {
-	AtlasData string
-	StyleCode string
-	Terms     []string
+	AtlasData   string
+	StyleCode   string
+	Terms       []string
+	Controllers []string
 }
 
 func FromJIRA(a atlas.Runner, jiraText string) Result {
@@ -86,11 +88,27 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 		fmt.Fprintln(os.Stderr, "--- Style reference loaded ---")
 	}
 
+	controllers := extractControllers(atlasData.String())
+
 	return Result{
-		AtlasData: atlasData.String(),
-		StyleCode: styleCode,
-		Terms:     terms,
+		AtlasData:   atlasData.String(),
+		StyleCode:   styleCode,
+		Terms:       terms,
+		Controllers: controllers,
 	}
+}
+
+func extractControllers(data string) []string {
+	ids := controllerIDPattern.FindAllString(data, -1)
+	seen := make(map[string]bool)
+	var unique []string
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	return unique
 }
 
 func discoverControllers(a atlas.Runner, atlasData *strings.Builder) {

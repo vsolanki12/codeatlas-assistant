@@ -23,6 +23,14 @@ type SolveData struct {
 	StyleCode   string
 }
 
+type ClaudeData struct {
+	JiraText    string
+	AtlasData   string
+	Conventions string
+	StyleCode   string
+	Controllers []string
+}
+
 type GenerateData struct {
 	Description string
 	AtlasData   string
@@ -55,12 +63,13 @@ func BuildGenerate(description, atlasData, styleCode, conventions string) string
 	})
 }
 
-func BuildClaude(jiraText, atlasData, conventions, styleCode string) string {
-	return execute("claude.tmpl", SolveData{
+func BuildClaude(jiraText, atlasData, conventions, styleCode string, controllers []string) string {
+	return execute("claude.tmpl", ClaudeData{
 		JiraText:    jiraText,
 		AtlasData:   atlasData,
 		Conventions: conventions,
 		StyleCode:   styleCode,
+		Controllers: controllers,
 	})
 }
 

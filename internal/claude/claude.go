@@ -20,7 +20,7 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile strin
 		atlasData = "(no atlas data available)"
 	}
 
-	claudeTemplate := prompt.BuildClaude(jiraText, atlasData, conventions, result.StyleCode)
+	claudeTemplate := prompt.BuildClaude(jiraText, atlasData, conventions, result.StyleCode, result.Controllers)
 	fmt.Fprintln(os.Stderr, "--- Distilling Claude prompt ---")
 	distilled, err := llm.GenerateString(claudeTemplate)
 	if err != nil {
