@@ -16,6 +16,7 @@ func main() {
 	solveFile := flag.String("solve-file", "", "solve a JIRA issue (read description from file)")
 	generate := flag.String("generate", "", "generate Go code (describe what to write)")
 	styleFile := flag.String("style-file", "", "Go file to use as style reference (auto-detect if empty)")
+	conventionsFile := flag.String("conventions", "", "conventions file (embedded default if empty)")
 	flag.Parse()
 
 	resolvedModel, err := resolveModel(*model)
@@ -24,28 +25,30 @@ func main() {
 		os.Exit(1)
 	}
 
+	conventions := loadConventions(*conventionsFile)
+
 	if *solveFile != "" {
 		data, err := os.ReadFile(*solveFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error reading file: %v\n", err)
 			os.Exit(1)
 		}
-		Solve(resolvedModel, *graphPath, string(data))
+		Solve(resolvedModel, *graphPath, string(data), conventions)
 		return
 	}
 
 	if *solve != "" {
-		Solve(resolvedModel, *graphPath, *solve)
+		Solve(resolvedModel, *graphPath, *solve, conventions)
 		return
 	}
 
 	if *generate != "" {
-		Generate(resolvedModel, *graphPath, *generate, *styleFile)
+		Generate(resolvedModel, *graphPath, *generate, *styleFile, conventions)
 		return
 	}
 
 	if *interactive {
-		runREPL(resolvedModel, *graphPath)
+		runREPL(resolvedModel, *graphPath, conventions)
 		return
 	}
 
@@ -57,7 +60,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       assistant --generate \"add a validation function for NodePool\"")
 		fmt.Fprintln(os.Stderr, "       assistant --interactive")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "flags: --model name, --graph path")
+		fmt.Fprintln(os.Stderr, "flags: --model name, --graph path, --conventions file")
 		os.Exit(1)
 	}
 
@@ -101,7 +104,7 @@ func handleQuestion(model, graphPath, question string) {
 	}
 }
 
-func runREPL(model, graphPath string) {
+func runREPL(model, graphPath, conventions string) {
 	fmt.Println("CodeAtlas Assistant (type 'exit' to quit)")
 	fmt.Println("  prefix with 'solve:' to analyze a JIRA description")
 	fmt.Println("  prefix with 'gen:' to generate Go code")
@@ -127,12 +130,12 @@ func runREPL(model, graphPath string) {
 		if strings.HasPrefix(input, "solve:") {
 			jiraText := strings.TrimSpace(strings.TrimPrefix(input, "solve:"))
 			if jiraText != "" {
-				Solve(model, graphPath, jiraText)
+				Solve(model, graphPath, jiraText, conventions)
 			}
 		} else if strings.HasPrefix(input, "gen:") {
 			desc := strings.TrimSpace(strings.TrimPrefix(input, "gen:"))
 			if desc != "" {
-				Generate(model, graphPath, desc, "")
+				Generate(model, graphPath, desc, "", conventions)
 			}
 		} else {
 			handleQuestion(model, graphPath, input)

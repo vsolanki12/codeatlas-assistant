@@ -9,7 +9,7 @@ import (
 
 var technicalPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`[A-Z][a-z]+(?:[A-Z][a-z]+)+`),            // CamelCase: HostedCluster, NodePool
-	regexp.MustCompile(`\b[a-z]+(?:[A-Z][a-z]+)+`),                // camelCase: reconcileEtcd, deleteNodePools
+	regexp.MustCompile(`\b[a-z]+(?:[A-Z][a-z]+)+`),               // camelCase: reconcileEtcd, deleteNodePools
 	regexp.MustCompile(`[a-z]+_[a-z]+(?:_[a-z]+)*`),              // snake_case: hosted_cluster
 	regexp.MustCompile(`[a-z]+\.[a-z]+\.io`),                     // CRD groups: hypershift.openshift.io
 	regexp.MustCompile(`[A-Z][a-zA-Z]*Reconciler`),               // Reconciler names
@@ -76,7 +76,7 @@ func ExtractTechnicalTerms(text string) []string {
 	return terms
 }
 
-func Solve(model, graphPath, jiraText string) {
+func Solve(model, graphPath, jiraText, conventions string) {
 	fmt.Fprintln(os.Stderr, "--- Extracting technical terms ---")
 	terms := ExtractTechnicalTerms(jiraText)
 
@@ -104,28 +104,40 @@ func Solve(model, graphPath, jiraText string) {
 
 	if atlasData.Len() == 0 {
 		fmt.Fprintln(os.Stderr, "no atlas matches found")
-		prompt := BuildSolvePrompt(jiraText, "(no atlas data available)")
+		prompt := BuildSolvePrompt(jiraText, "(no atlas data available)", conventions, "")
 		if err := AskOllamaStream(model, prompt); err != nil {
 			fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
 		}
 		return
 	}
 
-	topTerm := terms[0]
-	fmt.Fprintf(os.Stderr, "--- Deep dive: %s ---\n", topTerm)
-
-	explainResult, err := runAtlas(graphPath, "explain", topTerm)
-	if err == nil && !strings.Contains(explainResult, "not found") {
-		atlasData.WriteString(fmt.Sprintf("### Explain: %s\n%s\n", topTerm, explainResult))
+	deepDiveCount := 3
+	if len(terms) < deepDiveCount {
+		deepDiveCount = len(terms)
 	}
 
-	investigateResult, err := runAtlas(graphPath, "investigate", topTerm)
-	if err == nil && !strings.Contains(investigateResult, "not found") {
-		atlasData.WriteString(fmt.Sprintf("### Investigate: %s\n%s\n", topTerm, investigateResult))
+	for i := 0; i < deepDiveCount; i++ {
+		term := terms[i]
+		fmt.Fprintf(os.Stderr, "--- Deep dive: %s ---\n", term)
+
+		explainResult, err := runAtlas(graphPath, "explain", term)
+		if err == nil && !strings.Contains(explainResult, "not found") {
+			atlasData.WriteString(fmt.Sprintf("### Explain: %s\n%s\n", term, explainResult))
+		}
+
+		investigateResult, err := runAtlas(graphPath, "investigate", term)
+		if err == nil && !strings.Contains(investigateResult, "not found") {
+			atlasData.WriteString(fmt.Sprintf("### Investigate: %s\n%s\n", term, investigateResult))
+		}
+	}
+
+	styleCode := loadStyleReference("", atlasData.String(), graphPath)
+	if styleCode != "" {
+		fmt.Fprintln(os.Stderr, "--- Style reference loaded ---")
 	}
 
 	fmt.Fprintln(os.Stderr, "--- Generating solution ---")
-	prompt := BuildSolvePrompt(jiraText, atlasData.String())
+	prompt := BuildSolvePrompt(jiraText, atlasData.String(), conventions, styleCode)
 
 	if err := AskOllamaStream(model, prompt); err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)

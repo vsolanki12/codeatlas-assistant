@@ -10,7 +10,7 @@ import (
 
 var filePathPattern = regexp.MustCompile(`[a-zA-Z0-9_/.-]+\.go:\d+`)
 
-func Generate(model, graphPath, description, styleFile string) {
+func Generate(model, graphPath, description, styleFile, conventions string) {
 	fmt.Fprintln(os.Stderr, "--- Extracting context ---")
 	terms := ExtractTechnicalTerms(description)
 
@@ -52,7 +52,7 @@ func Generate(model, graphPath, description, styleFile string) {
 	styleCode := loadStyleReference(styleFile, atlasData.String(), graphPath)
 
 	fmt.Fprintln(os.Stderr, "--- Generating code ---")
-	prompt := BuildGeneratePrompt(description, atlasData.String(), styleCode)
+	prompt := BuildGeneratePrompt(description, atlasData.String(), styleCode, conventions)
 
 	if err := AskOllamaStream(model, prompt); err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
@@ -144,38 +144,3 @@ func readStyleFile(path string) string {
 	return content
 }
 
-func BuildGeneratePrompt(description, atlasData, styleCode string) string {
-	var styleSection string
-	if styleCode != "" {
-		styleSection = fmt.Sprintf(`
-## Style Reference (MATCH THIS EXACTLY)
-The code below is from the same codebase. Match its patterns exactly:
-- Same import style and aliases
-- Same error handling patterns (wrap with fmt.Errorf, use apierrors, etc.)
-- Same logging style (ctrl.LoggerFrom vs log.FromContext)
-- Same function signature patterns (context first, pointer receivers, etc.)
-- Same condition/status update patterns
-- Same naming conventions (camelCase for unexported, PascalCase for exported)
-
-`+"```go\n"+styleCode+"\n```\n")
-	}
-
-	return fmt.Sprintf(`You are a senior Go/Kubernetes/HyperShift engineer writing production code.
-
-Generate Go code that:
-1. Follows the EXACT patterns from the style reference below (if provided)
-2. Uses correct package names, function signatures, and types from the atlas data
-3. Matches controller-runtime conventions from the existing codebase
-4. Includes proper error handling matching the existing style
-
-Only output Go code with brief comments. No explanations outside code blocks.
-
-## What to Generate
-%s
-
-## CodeAtlas Architecture Data (entities, relationships, file paths)
-%s
-%s
-## Go Code
-`, description, atlasData, styleSection)
-}
