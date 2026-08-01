@@ -135,6 +135,14 @@ func Solve(model, graphPath, jiraText, conventions string) {
 
 	expandRelatedEntities(graphPath, terms, &atlasData)
 
+	if atlasData.Len() > 40000 {
+		fmt.Fprintf(os.Stderr, "atlas data: %d chars (capped to 40000)\n", atlasData.Len())
+		truncated := atlasData.String()[:40000]
+		atlasData.Reset()
+		atlasData.WriteString(truncated)
+		atlasData.WriteString("\n... (truncated)\n")
+	}
+
 	styleCode := loadStyleReference("", atlasData.String(), graphPath)
 	if styleCode != "" {
 		fmt.Fprintln(os.Stderr, "--- Style reference loaded ---")
@@ -160,6 +168,8 @@ func expandRelatedEntities(graphPath string, searchedTerms []string, atlasData *
 		searched[strings.ToLower(t)] = true
 	}
 
+	codeKinds := map[string]bool{"controller": true, "function": true, "crd": true}
+
 	var novel []string
 	seen := make(map[string]bool)
 	for _, id := range entityIDs {
@@ -168,9 +178,10 @@ func expandRelatedEntities(graphPath string, searchedTerms []string, atlasData *
 		}
 		seen[id] = true
 		parts := strings.SplitN(id, ":", 2)
-		if len(parts) == 2 && !searched[strings.ToLower(parts[1])] {
-			novel = append(novel, id)
+		if len(parts) != 2 || !codeKinds[parts[0]] || searched[strings.ToLower(parts[1])] {
+			continue
 		}
+		novel = append(novel, id)
 	}
 
 	if len(novel) == 0 {

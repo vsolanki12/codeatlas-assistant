@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 )
 
 type OllamaRequest struct {
@@ -63,7 +64,10 @@ func AskOllamaStream(model string, prompt string) error {
 		return err
 	}
 
-	resp, err := http.Post(
+	fmt.Fprintf(os.Stderr, "prompt size: %d chars\n", len(prompt))
+
+	client := &http.Client{Timeout: 10 * time.Minute}
+	resp, err := client.Post(
 		"http://localhost:11434/api/generate",
 		"application/json",
 		bytes.NewBuffer(body),

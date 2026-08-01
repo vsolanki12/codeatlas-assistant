@@ -59,6 +59,12 @@ Using the JIRA description, CodeAtlas architecture data, engineering conventions
 4. **Feature Gate**: If this adds new API fields, which feature gate to use and how to wire it
 5. **Tests**: What tests exist, what new tests are needed (follow the testing conventions)
 
+CRITICAL RULES:
+- ONLY reference files, functions, and paths that appear in the CodeAtlas data below. NEVER invent or guess file paths.
+- If the atlas data does not contain a relevant file or function, say "not found in atlas data" instead of fabricating a path.
+- Anchor your fix to specific entity IDs and file:line references from the atlas output.
+- When proposing code changes, show modifications to the actual functions found in the atlas data.
+
 Be specific. Reference actual controller names, function names, and file paths from the atlas data.
 Follow the engineering conventions exactly — feature gates, enum types, testing patterns.
 
