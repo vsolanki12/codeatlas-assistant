@@ -10,9 +10,11 @@ Copy the JIRA description verbatim.
 
 <architecture>
 Distill the atlas data into:
-- Controller: which controller owns this
+- API Controller: which controller reconciles the CR where the user sets this config
+- Workload Controller: which controller creates the actual Deployment/StatefulSet/DaemonSet for the affected component — this is usually the correct implementation point
+- If these are DIFFERENT controllers, the implementation point is in the workload controller (the one that renders container args, volumes, env vars)
 - Implementation Point: the specific function to modify
-- Reason: why this is the right entry point
+- Reason: why this is the right entry point — "it reconciles the CR" is NOT sufficient; explain what the function actually creates or modifies
 - Call Chain: how execution reaches this point
 </architecture>
 
@@ -48,10 +50,11 @@ List existing test files and what new tests are needed:
 Implement the smallest possible change to resolve this JIRA.
 
 Before writing code:
-1. Explain your reasoning
-2. Explain why the implementation point is correct
-3. Explain any side effects
-4. Then generate the patch
+1. Identify ALL controllers that touch the affected resource (API owner vs workload creator)
+2. Determine which controller actually renders the container spec, deployment args, or component config
+3. Explain your reasoning for choosing the implementation point — if the API controller just passes config through to another controller, the change belongs in the downstream controller
+4. Explain any side effects
+5. Then generate the patch
 
 Read ONLY the files listed in <files>. Do not search unrelated files unless absolutely necessary.
 </task>

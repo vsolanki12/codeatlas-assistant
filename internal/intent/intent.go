@@ -88,6 +88,19 @@ func ExtractEntity(question string) string {
 	return strings.Join(kept, " ")
 }
 
+var allUpperPattern = regexp.MustCompile(`^[A-Z]+$`)
+var parentheticalPattern = regexp.MustCompile(`([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s*\(([A-Z]{2,6})\)`)
+
+var hypershiftAcronyms = map[string]string{
+	"CPO": "ControlPlaneOperator",
+	"HO":  "HypershiftOperator",
+	"HCP": "HostedControlPlane",
+	"KAS": "KubeAPIServer",
+	"KCM": "KubeControllerManager",
+	"OCM": "OpenShiftControllerManager",
+	"OAPI": "OpenShiftAPIServer",
+}
+
 var technicalPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`[A-Z][a-z]+(?:[A-Z][a-z]+)+`),
 	regexp.MustCompile(`\b[a-z]+(?:[A-Z][a-z]+)+`),
@@ -126,14 +139,22 @@ func ExtractTechnicalTerms(text string) []string {
 	seen := make(map[string]bool)
 	var terms []string
 
+	addTerm := func(t string) {
+		lower := strings.ToLower(t)
+		if !seen[lower] {
+			seen[lower] = true
+			terms = append(terms, t)
+		}
+	}
+
+	for _, match := range parentheticalPattern.FindAllStringSubmatch(text, -1) {
+		camel := strings.ReplaceAll(match[1], " ", "")
+		addTerm(camel)
+	}
+
 	for _, pat := range technicalPatterns {
-		matches := pat.FindAllString(text, -1)
-		for _, m := range matches {
-			lower := strings.ToLower(m)
-			if !seen[lower] {
-				seen[lower] = true
-				terms = append(terms, m)
-			}
+		for _, m := range pat.FindAllString(text, -1) {
+			addTerm(m)
 		}
 	}
 
@@ -141,16 +162,28 @@ func ExtractTechnicalTerms(text string) []string {
 	for _, w := range words {
 		clean := strings.Trim(w, "?!.,;:'\"()[]{}*`~")
 		lower := strings.ToLower(clean)
-		if len(clean) < 3 || jiraStopWords[lower] || seen[lower] {
+		if jiraStopWords[lower] || seen[lower] {
+			continue
+		}
+
+		isAcronym := len(clean) >= 2 && clean == strings.ToUpper(clean) && allUpperPattern.MatchString(clean)
+		if isAcronym {
+			if expanded, ok := hypershiftAcronyms[clean]; ok {
+				addTerm(expanded)
+			}
+			if len(clean) >= 2 {
+				addTerm(clean)
+			}
+			continue
+		}
+
+		if len(clean) < 3 {
 			continue
 		}
 		if strings.Contains(clean, "/") || strings.Contains(clean, ".go") ||
 			strings.Contains(clean, "CRD") || strings.Contains(clean, "API") ||
 			(len(clean) > 0 && clean[0] >= 'A' && clean[0] <= 'Z' && len(clean) > 3) {
-			if !seen[lower] {
-				seen[lower] = true
-				terms = append(terms, clean)
-			}
+			addTerm(clean)
 		}
 	}
 

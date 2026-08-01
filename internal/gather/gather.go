@@ -12,6 +12,7 @@ import (
 )
 
 var entityIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document):[a-zA-Z0-9._]+`)
+var crdIDPattern = regexp.MustCompile(`crd:[a-zA-Z0-9._]+`)
 
 type Result struct {
 	AtlasData string
@@ -69,6 +70,7 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 		}
 	}
 
+	discoverControllers(a, &atlasData)
 	expandRelatedEntities(a, terms, &atlasData)
 
 	if atlasData.Len() > 40000 {
@@ -88,6 +90,36 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 		AtlasData: atlasData.String(),
 		StyleCode: styleCode,
 		Terms:     terms,
+	}
+}
+
+func discoverControllers(a atlas.Runner, atlasData *strings.Builder) {
+	collected := atlasData.String()
+	crdIDs := crdIDPattern.FindAllString(collected, -1)
+	if len(crdIDs) == 0 {
+		return
+	}
+
+	seen := make(map[string]bool)
+	var unique []string
+	for _, id := range crdIDs {
+		if !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	if len(unique) > 3 {
+		unique = unique[:3]
+	}
+
+	fmt.Fprintf(os.Stderr, "--- Discovering controllers for %d CRDs ---\n", len(unique))
+	for _, crdID := range unique {
+		result, err := a.Run("context", crdID, "--depth", "2")
+		if err != nil || strings.Contains(result, "Empty subgraph") {
+			continue
+		}
+		atlasData.WriteString(fmt.Sprintf("### Controllers for %s\n%s\n", crdID, result))
+		fmt.Fprintf(os.Stderr, "  discovered: %s\n", crdID)
 	}
 }
 
