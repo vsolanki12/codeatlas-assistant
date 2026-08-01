@@ -77,7 +77,7 @@ func main() {
 		if *claudeFlag {
 			out := *outputFile
 			if out == "" {
-				out = "claude-prompt.md"
+				out = "claude-prompt.xml"
 			}
 			claude.Run(a, llm, *solveFlag, conventions, out)
 		} else {
@@ -200,7 +200,7 @@ func runREPL(a atlas.Runner, llm ollama.LLM, conventions string) {
 		} else if strings.HasPrefix(input, "claude:") {
 			jiraText := strings.TrimSpace(strings.TrimPrefix(input, "claude:"))
 			if jiraText != "" {
-				claude.Run(a, llm, jiraText, conventions, "claude-prompt.md")
+				claude.Run(a, llm, jiraText, conventions, "claude-prompt.xml")
 			}
 		} else if strings.HasPrefix(input, "gen:") {
 			desc := strings.TrimSpace(strings.TrimPrefix(input, "gen:"))

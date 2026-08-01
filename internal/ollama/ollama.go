@@ -8,11 +8,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
 type LLM interface {
 	Generate(prompt string) error
+	GenerateString(prompt string) (string, error)
 }
 
 type Client struct {
@@ -100,4 +102,49 @@ func (c *Client) Generate(prompt string) error {
 	}
 
 	return scanner.Err()
+}
+
+func (c *Client) GenerateString(prompt string) (string, error) {
+	req := request{
+		Model:  c.Model,
+		Prompt: prompt,
+		Stream: true,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+
+	fmt.Fprintf(os.Stderr, "prompt size: %d chars\n", len(prompt))
+
+	client := &http.Client{Timeout: 10 * time.Minute}
+	resp, err := client.Post(
+		"http://localhost:11434/api/generate",
+		"application/json",
+		bytes.NewBuffer(body),
+	)
+	if err != nil {
+		return "", fmt.Errorf("cannot connect to ollama (is it running?): %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result strings.Builder
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		var chunk response
+		if err := json.Unmarshal(scanner.Bytes(), &chunk); err != nil {
+			continue
+		}
+		result.WriteString(chunk.Response)
+		if chunk.Done {
+			break
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return result.String(), nil
 }
