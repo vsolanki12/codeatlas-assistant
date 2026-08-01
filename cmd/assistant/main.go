@@ -22,8 +22,9 @@ func main() {
 	interactive := flag.Bool("interactive", false, "interactive REPL mode")
 	solveFlag := flag.String("solve", "", "solve a JIRA issue (pass description text)")
 	solveFile := flag.String("solve-file", "", "solve a JIRA issue (read description from file)")
-	claudeFlag := flag.Bool("claude", false, "output Claude-optimized prompt (use with --solve/--solve-file)")
-	claudeFile := flag.String("claude-file", "", "generate Claude-optimized prompt from JIRA file")
+	claudeFlag := flag.Bool("claude", false, "save Claude prompt to file + show analysis on screen")
+	claudeFile := flag.String("claude-file", "", "read JIRA from file, save Claude prompt + show analysis")
+	outputFile := flag.String("output", "", "output file for Claude prompt (auto-named if empty)")
 	generateFlag := flag.String("generate", "", "generate Go code (describe what to write)")
 	styleFile := flag.String("style-file", "", "Go file to use as style reference (auto-detect if empty)")
 	conventionsFile := flag.String("conventions", "", "conventions file (embedded default if empty)")
@@ -46,7 +47,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error reading file: %v\n", err)
 			os.Exit(1)
 		}
-		claude.Run(a, llm, string(data), conventions)
+		out := *outputFile
+		if out == "" {
+			out = claude.DefaultOutputName(*claudeFile)
+		}
+		claude.Run(a, llm, string(data), conventions, out)
 		return
 	}
 
@@ -57,7 +62,11 @@ func main() {
 			os.Exit(1)
 		}
 		if *claudeFlag {
-			claude.Run(a, llm, string(data), conventions)
+			out := *outputFile
+			if out == "" {
+				out = claude.DefaultOutputName(*solveFile)
+			}
+			claude.Run(a, llm, string(data), conventions, out)
 		} else {
 			solve.Run(a, llm, string(data), conventions, *forceSolve)
 		}
@@ -66,7 +75,11 @@ func main() {
 
 	if *solveFlag != "" {
 		if *claudeFlag {
-			claude.Run(a, llm, *solveFlag, conventions)
+			out := *outputFile
+			if out == "" {
+				out = "claude-prompt.md"
+			}
+			claude.Run(a, llm, *solveFlag, conventions, out)
 		} else {
 			solve.Run(a, llm, *solveFlag, conventions, *forceSolve)
 		}
@@ -89,6 +102,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       assistant --solve \"JIRA description text\"")
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt")
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude")
+		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude --output prompt.md")
 		fmt.Fprintln(os.Stderr, "       assistant --claude-file jira.txt")
 		fmt.Fprintln(os.Stderr, "       assistant --generate \"add a validation function for NodePool\"")
 		fmt.Fprintln(os.Stderr, "       assistant --interactive")
@@ -186,7 +200,7 @@ func runREPL(a atlas.Runner, llm ollama.LLM, conventions string) {
 		} else if strings.HasPrefix(input, "claude:") {
 			jiraText := strings.TrimSpace(strings.TrimPrefix(input, "claude:"))
 			if jiraText != "" {
-				claude.Run(a, llm, jiraText, conventions)
+				claude.Run(a, llm, jiraText, conventions, "claude-prompt.md")
 			}
 		} else if strings.HasPrefix(input, "gen:") {
 			desc := strings.TrimSpace(strings.TrimPrefix(input, "gen:"))
