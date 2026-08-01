@@ -4,7 +4,7 @@
 
 ```bash
 cd ~/codeatlas-assistant
-go build -o assistant .
+go build -o assistant ./cmd/assistant/
 ```
 
 Requires `atlas` on PATH: `cd ~/codeatlas && go install ./cmd/atlas`
@@ -88,6 +88,37 @@ Auto-detection reads the `repository` field from the atlas graph JSON to find th
 then picks a controller `.go` file from atlas output. Works when the graph was built by scanning
 the actual repository (not test data).
 
+## Claude Mode — Generate Claude-Optimized Prompts
+
+Generate a structured implementation prompt with XML tags that Claude can act on immediately.
+No Claude tokens consumed until you paste the output. Everything runs locally via Ollama.
+
+```bash
+# Inline
+./assistant --graph ~/codeatlas/hypershift-graph.json \
+  --claude "NodePool stuck in Provisioning state after etcd recovery"
+
+# From file
+./assistant --graph ~/codeatlas/hypershift-graph.json --claude-file jira-description.txt
+```
+
+Output includes XML-structured sections:
+- `<jira>` — raw JIRA description
+- `<architecture>` — controller, implementation point, call chain
+- `<files>` — specific files Claude should read (with reasons)
+- `<functions>` — functions to modify or reference
+- `<tests>` — existing tests + needed tests
+- `<constraints>` — coding conventions, idempotency rules
+- `<task>` — implementation instructions
+
+**Workflow:**
+```
+JIRA → assistant --claude → local LLM distills atlas data → Claude-ready prompt → paste into Claude Code
+```
+
+Claude starts with full context instead of discovering architecture from scratch.
+Estimated 50-70% token reduction vs giving Claude the raw JIRA.
+
 ## Specify Model
 
 ```bash
@@ -106,6 +137,7 @@ Auto-detects first available Ollama model if `--model` is omitted.
 ```
 CodeAtlas Assistant (type 'exit' to quit)
   prefix with 'solve:' to analyze a JIRA description
+  prefix with 'claude:' to generate Claude prompt
   prefix with 'gen:' to generate Go code
   graph: ~/codeatlas/hypershift-graph.json | model: deepseek-coder-v2:latest
 
@@ -114,6 +146,9 @@ CodeAtlas Assistant (type 'exit' to quit)
 
 > solve: NodePool stuck in Provisioning after etcd recovery...
 (analyzes and streams solution)
+
+> claude: NodePool stuck in Provisioning after etcd recovery...
+(generates Claude-ready prompt with XML tags)
 
 > gen: add etcd health check function
 (generates Go code)
@@ -153,6 +188,9 @@ Override with a custom conventions file for other projects:
 | `--interactive` | false | Enter REPL mode |
 | `--solve` | — | JIRA description text to analyze |
 | `--solve-file` | — | Path to file containing JIRA description |
+| `--claude` | — | JIRA text — generate Claude-optimized prompt |
+| `--claude-file` | — | Path to file — generate Claude-optimized prompt |
 | `--generate` | — | Description of Go code to generate |
+| `--force-solve` | false | Skip existing fix check in solve mode |
 | `--style-file` | auto-detect | Go file to use as style reference |
 | `--conventions` | embedded | Conventions file for domain knowledge |

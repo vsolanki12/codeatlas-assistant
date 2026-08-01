@@ -39,7 +39,7 @@ Or build from source:
 ```bash
 git clone https://github.com/vsolanki12/codeatlas-assistant.git
 cd codeatlas-assistant
-go build -o assistant .
+go build -o assistant ./cmd/assistant/
 ```
 
 ## Modes
@@ -85,17 +85,29 @@ assistant --graph graph.json \
 assistant --graph graph.json --generate "add etcd health check"
 ```
 
+### Claude Mode
+
+Generate a structured, Claude-optimized implementation prompt from a JIRA description. Uses local LLM to distill atlas data into XML-tagged sections that Claude can act on immediately — no architecture discovery needed.
+
+```bash
+assistant --graph graph.json --claude "NodePool stuck in Provisioning after etcd recovery"
+assistant --graph graph.json --claude-file jira-description.txt
+```
+
+Output is a ready-to-paste Claude Code prompt with `<jira>`, `<architecture>`, `<files>`, `<functions>`, `<tests>`, `<constraints>`, and `<task>` sections. Zero Claude tokens consumed until you paste the output.
+
 ### Interactive REPL
 
 ```bash
 assistant --graph graph.json --interactive
 ```
 
-Supports `solve:` and `gen:` prefixes inline:
+Supports `solve:`, `claude:`, and `gen:` prefixes inline:
 
 ```
 > what reconciles HostedCluster
 > solve: NodePool stuck after etcd recovery...
+> claude: NodePool stuck after etcd recovery...
 > gen: add etcd health check function
 > exit
 ```
@@ -131,15 +143,21 @@ Supports `solve:` and `gen:` prefixes inline:
 
 ## Architecture
 
-| File | Purpose |
-|------|---------|
-| `main.go` | CLI entry point, flag parsing, REPL loop |
-| `intent.go` | Intent detection from keywords, entity extraction |
-| `atlas.go` | Shells out to `atlas` CLI, maps intents to commands |
-| `ollama.go` | Ollama API client, model listing, streaming response |
-| `prompt.go` | Prompt templates for question and solve modes |
-| `solve.go` | JIRA analysis — technical term extraction, multi-search |
-| `generate.go` | Code generation — style file loading, repo root detection |
+```
+cmd/assistant/main.go           — CLI entry point, flag parsing, REPL
+internal/
+  atlas/atlas.go                — Runner interface + Client for atlas CLI
+  ollama/ollama.go              — LLM interface + Client for Ollama API
+  intent/intent.go              — Intent detection, entity/term extraction
+  prompt/prompt.go              — Template-based prompt builders
+  prompt/templates/*.tmpl       — Prompt templates (ask, solve, generate, claude)
+  prompt/conventions.go         — Embedded engineering conventions
+  gather/gather.go              — Shared atlas data gathering pipeline
+  style/style.go                — Style reference loading, repo root detection
+  solve/solve.go                — JIRA analysis with existing fix detection
+  generate/generate.go          — Code generation with style matching
+  claude/claude.go              — Claude-optimized prompt generation
+```
 
 ## Flags
 
@@ -150,8 +168,12 @@ Supports `solve:` and `gen:` prefixes inline:
 | `--interactive` | `false` | Enter REPL mode |
 | `--solve` | | JIRA description text to analyze |
 | `--solve-file` | | Path to file with JIRA description |
+| `--claude` | | JIRA text — generate Claude-optimized prompt |
+| `--claude-file` | | Path to file — generate Claude-optimized prompt |
 | `--generate` | | Description of Go code to generate |
 | `--style-file` | auto-detect | Go file to use as style reference |
+| `--conventions` | embedded | Custom conventions file |
+| `--force-solve` | `false` | Skip existing fix check in solve mode |
 
 ## License
 
