@@ -102,7 +102,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       assistant --solve \"JIRA description text\"")
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt")
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude")
-		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude --output prompt.md")
+		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude --output prompt.xml")
 		fmt.Fprintln(os.Stderr, "       assistant --claude-file jira.txt")
 		fmt.Fprintln(os.Stderr, "       assistant --generate \"add a validation function for NodePool\"")
 		fmt.Fprintln(os.Stderr, "       assistant --interactive")

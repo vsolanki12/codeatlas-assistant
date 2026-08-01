@@ -94,30 +94,33 @@ Generate a structured implementation prompt with XML tags that Claude can act on
 No Claude tokens consumed until you paste the output. Everything runs locally via Ollama.
 
 ```bash
-# Inline
-./assistant --graph ~/codeatlas/hypershift-graph.json \
-  --claude "NodePool stuck in Provisioning state after etcd recovery"
+# From file (recommended)
+./assistant --graph ~/codeatlas/hypershift-graph.json --solve-file jira.txt --claude
 
-# From file
+# With custom output name
+./assistant --graph ~/codeatlas/hypershift-graph.json --solve-file jira.txt --claude --output my-prompt.xml
+
+# From --claude-file (standalone)
 ./assistant --graph ~/codeatlas/hypershift-graph.json --claude-file jira-description.txt
 ```
 
-Output includes XML-structured sections:
-- `<jira>` — raw JIRA description
-- `<architecture>` — controller, implementation point, call chain
-- `<files>` — specific files Claude should read (with reasons)
-- `<functions>` — functions to modify or reference
-- `<tests>` — existing tests + needed tests
-- `<constraints>` — coding conventions, idempotency rules
-- `<task>` — implementation instructions
+**Dual output:**
+- **Screen** — human-readable engineering analysis (streamed via Ollama)
+- **File** — distilled XML prompt for Claude (saved to `<input>-claude.xml`)
+
+The local LLM distills ~40K of raw atlas data into a compact structured prompt (~3-5K).
+XML sections include `<jira>`, `<architecture>`, `<files>`, `<functions>`, `<tests>`,
+`<constraints>`, and `<task>`.
 
 **Workflow:**
 ```
-JIRA → assistant --claude → local LLM distills atlas data → Claude-ready prompt → paste into Claude Code
+JIRA → atlas gathers 40K context → local LLM distills to XML → file saved
+                                 → local LLM streams analysis → screen
+                                                    ↓
+                              paste XML into Claude Code → implementation
 ```
 
-Claude starts with full context instead of discovering architecture from scratch.
-Estimated 50-70% token reduction vs giving Claude the raw JIRA.
+Zero Claude tokens until you paste. Estimated 50-70% token reduction vs raw JIRA.
 
 ## Specify Model
 
@@ -188,8 +191,9 @@ Override with a custom conventions file for other projects:
 | `--interactive` | false | Enter REPL mode |
 | `--solve` | — | JIRA description text to analyze |
 | `--solve-file` | — | Path to file containing JIRA description |
-| `--claude` | — | JIRA text — generate Claude-optimized prompt |
+| `--claude` | false | Save distilled XML prompt to file + stream analysis to screen |
 | `--claude-file` | — | Path to file — generate Claude-optimized prompt |
+| `--output` | auto | Output file for Claude prompt (default: `<input>-claude.xml`) |
 | `--generate` | — | Description of Go code to generate |
 | `--force-solve` | false | Skip existing fix check in solve mode |
 | `--style-file` | auto-detect | Go file to use as style reference |
