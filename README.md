@@ -1,8 +1,26 @@
 # CodeAtlas Assistant
 
-Natural language interface for [CodeAtlas](https://github.com/vsolanki12/codeatlas) using local Ollama models.
+A CLI tool that lets you talk to your codebase in plain English using local LLMs.
 
-Ask questions about your codebase in plain English. The assistant detects intent, runs the right atlas commands, and streams an LLM-powered answer.
+## What Is This?
+
+[CodeAtlas](https://github.com/vsolanki12/codeatlas) builds a knowledge graph of your codebase — controllers, CRDs, functions, packages, and how they connect. It exposes this through CLI commands like `atlas search`, `atlas explain`, `atlas impact`, etc.
+
+**CodeAtlas Assistant** sits on top of that. You ask a question in natural language, and it:
+
+1. **Detects your intent** — are you asking how something works? what would break if you changed it? looking for a function?
+2. **Runs the right atlas commands** — search, explain, impact, investigate — to gather relevant architecture data
+3. **Feeds everything to a local Ollama model** — your question + the atlas data as context
+4. **Streams the answer** — no cloud APIs, everything runs locally
+
+It also has specialized modes for **analyzing JIRA issues** (paste a bug description, get root cause analysis with actual file paths) and **generating Go code** that matches your existing codebase patterns.
+
+### Why Not Just Use ChatGPT/Claude?
+
+- **Runs 100% locally** — no code leaves your machine. Uses Ollama with any model you have.
+- **Grounded in real architecture** — answers come from the actual code graph, not training data hallucinations. Every entity, relationship, and file path is real.
+- **Codebase-aware code generation** — the generate mode reads actual source files from your repo and instructs the model to match exact patterns (import aliases, error handling, logging style, naming conventions).
+- **Works offline** — airport, VPN issues, air-gapped environments.
 
 ## Prerequisites
 
@@ -85,14 +103,43 @@ Supports `solve:` and `gen:` prefixes inline:
 ## How It Works
 
 ```
-Question
-  -> Intent Detection (keyword matching)
-  -> Entity Extraction (technical term parsing)
-  -> Atlas CLI Commands (search, explain, impact, investigate, ask, view, stats)
-  -> Prompt Construction (question + atlas data + optional style reference)
-  -> Ollama Streaming (/api/generate, NDJSON)
-  -> Printed Answer
+                        ┌─────────────────┐
+  "what reconciles      │ Intent Detection │  explain / impact / investigate /
+   HostedCluster?"  ──> │ (keyword match)  │  search / stats / ask
+                        └────────┬────────┘
+                                 │
+                        ┌────────▼────────┐
+                        │ Entity Extraction│  "HostedCluster"
+                        │ (term parsing)   │
+                        └────────┬────────┘
+                                 │
+                        ┌────────▼────────┐
+                        │  Atlas CLI       │  atlas explain HostedCluster
+                        │  (shells out)    │  --graph graph.json
+                        └────────┬────────┘
+                                 │
+                        ┌────────▼────────┐
+                        │ Prompt Builder   │  question + atlas data
+                        │                  │  + style reference (generate mode)
+                        └────────┬────────┘
+                                 │
+                        ┌────────▼────────┐
+                        │ Ollama Streaming │  POST /api/generate
+                        │ (NDJSON parse)   │  prints tokens as they arrive
+                        └─────────────────┘
 ```
+
+## Architecture
+
+| File | Purpose |
+|------|---------|
+| `main.go` | CLI entry point, flag parsing, REPL loop |
+| `intent.go` | Intent detection from keywords, entity extraction |
+| `atlas.go` | Shells out to `atlas` CLI, maps intents to commands |
+| `ollama.go` | Ollama API client, model listing, streaming response |
+| `prompt.go` | Prompt templates for question and solve modes |
+| `solve.go` | JIRA analysis — technical term extraction, multi-search |
+| `generate.go` | Code generation — style file loading, repo root detection |
 
 ## Flags
 
