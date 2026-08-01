@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+var entityIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document):[a-zA-Z0-9._]+`)
+
 var technicalPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`[A-Z][a-z]+(?:[A-Z][a-z]+)+`),            // CamelCase: HostedCluster, NodePool
 	regexp.MustCompile(`\b[a-z]+(?:[A-Z][a-z]+)+`),               // camelCase: reconcileEtcd, deleteNodePools
@@ -131,6 +133,8 @@ func Solve(model, graphPath, jiraText, conventions string) {
 		}
 	}
 
+	expandRelatedEntities(graphPath, terms, &atlasData)
+
 	styleCode := loadStyleReference("", atlasData.String(), graphPath)
 	if styleCode != "" {
 		fmt.Fprintln(os.Stderr, "--- Style reference loaded ---")
@@ -141,5 +145,55 @@ func Solve(model, graphPath, jiraText, conventions string) {
 
 	if err := AskOllamaStream(model, prompt); err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
+	}
+}
+
+func expandRelatedEntities(graphPath string, searchedTerms []string, atlasData *strings.Builder) {
+	collected := atlasData.String()
+	entityIDs := entityIDPattern.FindAllString(collected, -1)
+	if len(entityIDs) == 0 {
+		return
+	}
+
+	searched := make(map[string]bool)
+	for _, t := range searchedTerms {
+		searched[strings.ToLower(t)] = true
+	}
+
+	var novel []string
+	seen := make(map[string]bool)
+	for _, id := range entityIDs {
+		if seen[id] || searched[strings.ToLower(id)] {
+			continue
+		}
+		seen[id] = true
+		parts := strings.SplitN(id, ":", 2)
+		if len(parts) == 2 && !searched[strings.ToLower(parts[1])] {
+			novel = append(novel, id)
+		}
+	}
+
+	if len(novel) == 0 {
+		return
+	}
+
+	if len(novel) > 5 {
+		novel = novel[:5]
+	}
+
+	fmt.Fprintf(os.Stderr, "--- Expanding %d related entities ---\n", len(novel))
+	for _, id := range novel {
+		parts := strings.SplitN(id, ":", 2)
+		name := parts[1]
+		if idx := strings.LastIndex(name, "."); idx != -1 {
+			name = name[idx+1:]
+		}
+
+		result, err := runAtlas(graphPath, "investigate", name)
+		if err != nil || strings.Contains(result, "not found") {
+			continue
+		}
+		atlasData.WriteString(fmt.Sprintf("### Related: %s\n%s\n", id, result))
+		fmt.Fprintf(os.Stderr, "  expanded: %s\n", id)
 	}
 }
