@@ -22,7 +22,7 @@ func main() {
 	interactive := flag.Bool("interactive", false, "interactive REPL mode")
 	solveFlag := flag.String("solve", "", "solve a JIRA issue (pass description text)")
 	solveFile := flag.String("solve-file", "", "solve a JIRA issue (read description from file)")
-	claudeFlag := flag.String("claude", "", "generate Claude-optimized prompt from JIRA text")
+	claudeFlag := flag.Bool("claude", false, "output Claude-optimized prompt (use with --solve/--solve-file)")
 	claudeFile := flag.String("claude-file", "", "generate Claude-optimized prompt from JIRA file")
 	generateFlag := flag.String("generate", "", "generate Go code (describe what to write)")
 	styleFile := flag.String("style-file", "", "Go file to use as style reference (auto-detect if empty)")
@@ -50,23 +50,26 @@ func main() {
 		return
 	}
 
-	if *claudeFlag != "" {
-		claude.Run(a, llm, *claudeFlag, conventions)
-		return
-	}
-
 	if *solveFile != "" {
 		data, err := os.ReadFile(*solveFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error reading file: %v\n", err)
 			os.Exit(1)
 		}
-		solve.Run(a, llm, string(data), conventions, *forceSolve)
+		if *claudeFlag {
+			claude.Run(a, llm, string(data), conventions)
+		} else {
+			solve.Run(a, llm, string(data), conventions, *forceSolve)
+		}
 		return
 	}
 
 	if *solveFlag != "" {
-		solve.Run(a, llm, *solveFlag, conventions, *forceSolve)
+		if *claudeFlag {
+			claude.Run(a, llm, *solveFlag, conventions)
+		} else {
+			solve.Run(a, llm, *solveFlag, conventions, *forceSolve)
+		}
 		return
 	}
 
@@ -85,7 +88,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: assistant [flags] \"your question\"")
 		fmt.Fprintln(os.Stderr, "       assistant --solve \"JIRA description text\"")
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt")
-		fmt.Fprintln(os.Stderr, "       assistant --claude \"JIRA description text\"")
+		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude")
 		fmt.Fprintln(os.Stderr, "       assistant --claude-file jira.txt")
 		fmt.Fprintln(os.Stderr, "       assistant --generate \"add a validation function for NodePool\"")
 		fmt.Fprintln(os.Stderr, "       assistant --interactive")
