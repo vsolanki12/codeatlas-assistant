@@ -7,7 +7,7 @@ You are an engineering assistant preparing a structured implementation prompt fo
 {{- if .WorkloadController}}
 
 WORKLOAD CONTROLLER (implementation point): {{.WorkloadController}}
-This controller was identified by file path analysis as the one that creates/modifies actual workloads (Deployments, StatefulSets, container args). Your <architecture> section MUST use this controller as the implementation point.
+This controller was identified by atlas graph analysis as the one that creates/modifies actual workloads (Deployments, StatefulSets, container args). Your <architecture> section MUST use this controller as the implementation point.
 {{- end}}
 {{- if .Controllers}}
 
@@ -15,6 +15,31 @@ All discovered controllers:
 {{- range .Controllers}}
 - {{.ID}} | {{.File}} | role: {{.Role}}
 {{- end}}
+{{- end}}
+
+{{- if .Framework}}
+
+## Component Framework (detected at {{.Framework.RelPath}})
+
+Found {{.Framework.Count}} component directories following a common pattern.
+Each component directory typically contains:
+- component.go — component registration
+- deployment.go or statefulset.go — workload adaptation function that mutates container args, env vars, and volumes
+
+Component directories:
+```
+{{.Framework.Components}}
+```
+{{- end}}
+
+{{- if .RepoFiles}}
+
+## Repository File Tree (real files — use ONLY these paths)
+The following files exist in the repository. When listing files in <files>, pick ONLY from this list.
+Do NOT invent or guess file paths.
+```
+{{.RepoFiles}}
+```
 {{- end}}
 
 Produce a Claude-optimized implementation prompt using this EXACT XML structure — no extra text before or after:
@@ -28,31 +53,37 @@ Copy the JIRA description verbatim.
 - Workload Controller: {{.WorkloadController}} (LOCKED — do not change this)
 {{- end}}
 - API Controller: the controller that reconciles the user-facing CR (if different from workload controller)
-- Implementation Point: a specific function in the WORKLOAD controller to modify
+{{- if .Framework}}
+- Implementation Point: the workload adaptation function in the relevant component directory under {{.Framework.RelPath}}
+{{- else}}
+- Implementation Point: the specific function to modify in the workload controller
+{{- end}}
 - Reason: what this function creates or modifies (not just "it reconciles")
-- Call Chain: how execution reaches this point
 </architecture>
 
 <files>
-List ONLY files from the WORKLOAD controller directory, one per line:
+{{- if .Framework}}
+List files from the workload controller directory AND relevant component directories under {{.Framework.RelPath}}, one per line:
+{{- else}}
+List files to modify, one per line:
+{{- end}}
 - path/to/file.go — reason
 </files>
 
 <functions>
-List functions to modify in the WORKLOAD controller:
+List functions to modify:
 - FunctionName — what it does
 </functions>
 
 <tests>
-- Existing: path/to/test.go (from workload controller directory)
+- Existing: path/to/test.go
 - Needed: describe what to test
 </tests>
 
 <constraints>
-- Follow existing controller-runtime patterns
+- Follow existing patterns in the codebase
 - Keep reconciliation idempotent
 - Do not modify unrelated controllers
-- Preserve existing logging style (ctrl.LoggerFrom)
 - Reuse helper functions whenever possible
 - Wrap errors with fmt.Errorf("context: %w", err)
 {{- if .Conventions}}
@@ -62,11 +93,15 @@ List functions to modify in the WORKLOAD controller:
 
 <task>
 Implement the smallest possible change to resolve this JIRA.
-The implementation point is in the WORKLOAD controller listed above.
-1. Explain what the workload controller creates/modifies for this component
-2. Identify the specific function that renders the container spec or component config
-3. Explain any side effects
-4. Generate the patch
+{{- if .Framework}}
+1. Identify which component directories under {{.Framework.RelPath}} are affected
+2. Find the workload adaptation function in each affected component
+3. For shared logic, add helper functions in a common utility package
+{{- else}}
+1. Identify the controller and function to modify
+{{- end}}
+- Explain any side effects
+- Generate the patch
 </task>
 
 ## CodeAtlas Architecture Data (focused on workload controller)

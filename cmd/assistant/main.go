@@ -25,6 +25,7 @@ func main() {
 	claudeFlag := flag.Bool("claude", false, "save Claude prompt to file + show analysis on screen")
 	claudeFile := flag.String("claude-file", "", "read JIRA from file, save Claude prompt + show analysis")
 	outputFile := flag.String("output", "", "output file for Claude prompt (auto-named if empty)")
+	repoPath := flag.String("repo", "", "path to source repo (injects file tree into Claude prompt)")
 	generateFlag := flag.String("generate", "", "generate Go code (describe what to write)")
 	styleFile := flag.String("style-file", "", "Go file to use as style reference (auto-detect if empty)")
 	conventionsFile := flag.String("conventions", "", "conventions file (embedded default if empty)")
@@ -51,7 +52,7 @@ func main() {
 		if out == "" {
 			out = claude.DefaultOutputName(*claudeFile)
 		}
-		claude.Run(a, llm, string(data), conventions, out)
+		claude.Run(a, llm, string(data), conventions, out, *repoPath)
 		return
 	}
 
@@ -66,7 +67,7 @@ func main() {
 			if out == "" {
 				out = claude.DefaultOutputName(*solveFile)
 			}
-			claude.Run(a, llm, string(data), conventions, out)
+			claude.Run(a, llm, string(data), conventions, out, *repoPath)
 		} else {
 			solve.Run(a, llm, string(data), conventions, *forceSolve)
 		}
@@ -79,7 +80,7 @@ func main() {
 			if out == "" {
 				out = "claude-prompt.xml"
 			}
-			claude.Run(a, llm, *solveFlag, conventions, out)
+			claude.Run(a, llm, *solveFlag, conventions, out, *repoPath)
 		} else {
 			solve.Run(a, llm, *solveFlag, conventions, *forceSolve)
 		}
@@ -103,6 +104,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt")
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude")
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude --output prompt.xml")
+		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude --repo ~/hypershift")
 		fmt.Fprintln(os.Stderr, "       assistant --claude-file jira.txt")
 		fmt.Fprintln(os.Stderr, "       assistant --generate \"add a validation function for NodePool\"")
 		fmt.Fprintln(os.Stderr, "       assistant --interactive")
@@ -114,6 +116,8 @@ func main() {
 	handleQuestion(a, llm, question)
 }
 
+var preferredModels = []string{"qwen3:14b", "qwen3:8b", "qwen2.5-coder:14b"}
+
 func resolveModel(model string) (string, error) {
 	if model != "" {
 		return model, nil
@@ -124,7 +128,18 @@ func resolveModel(model string) (string, error) {
 		return "", err
 	}
 	if len(models) == 0 {
-		return "", fmt.Errorf("no ollama models installed — run: ollama pull qwen3:8b")
+		return "", fmt.Errorf("no ollama models installed — run: ollama pull qwen3:14b")
+	}
+
+	available := make(map[string]bool, len(models))
+	for _, m := range models {
+		available[m] = true
+	}
+	for _, pref := range preferredModels {
+		if available[pref] {
+			fmt.Fprintf(os.Stderr, "using model: %s\n", pref)
+			return pref, nil
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "using model: %s\n", models[0])
@@ -200,7 +215,7 @@ func runREPL(a atlas.Runner, llm ollama.LLM, conventions string) {
 		} else if strings.HasPrefix(input, "claude:") {
 			jiraText := strings.TrimSpace(strings.TrimPrefix(input, "claude:"))
 			if jiraText != "" {
-				claude.Run(a, llm, jiraText, conventions, "claude-prompt.xml")
+				claude.Run(a, llm, jiraText, conventions, "claude-prompt.xml", "")
 			}
 		} else if strings.HasPrefix(input, "gen:") {
 			desc := strings.TrimSpace(strings.TrimPrefix(input, "gen:"))

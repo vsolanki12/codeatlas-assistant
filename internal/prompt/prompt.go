@@ -29,13 +29,21 @@ type ControllerEntry struct {
 	Role string
 }
 
+type FrameworkInfo struct {
+	RelPath    string
+	Components string
+	Count      int
+}
+
 type ClaudeData struct {
-	JiraText          string
-	AtlasData         string
-	Conventions       string
-	StyleCode         string
-	Controllers       []ControllerEntry
+	JiraText           string
+	AtlasData          string
+	Conventions        string
+	StyleCode          string
+	Controllers        []ControllerEntry
 	WorkloadController string
+	RepoFiles          string
+	Framework          *FrameworkInfo
 }
 
 type GenerateData struct {
@@ -70,7 +78,7 @@ func BuildGenerate(description, atlasData, styleCode, conventions string) string
 	})
 }
 
-func BuildClaude(jiraText, atlasData, conventions, styleCode string, controllers []ControllerEntry) string {
+func BuildClaude(jiraText, atlasData, conventions, styleCode, repoFiles string, framework *FrameworkInfo, controllers []ControllerEntry) string {
 	workload := ""
 	for _, c := range controllers {
 		if c.Role == "workload" {
@@ -79,12 +87,14 @@ func BuildClaude(jiraText, atlasData, conventions, styleCode string, controllers
 		}
 	}
 	return execute("claude.tmpl", ClaudeData{
-		JiraText:          jiraText,
-		AtlasData:         atlasData,
-		Conventions:       conventions,
-		StyleCode:         styleCode,
-		Controllers:       controllers,
+		JiraText:           jiraText,
+		AtlasData:          atlasData,
+		Conventions:        conventions,
+		StyleCode:          styleCode,
+		Controllers:        controllers,
 		WorkloadController: workload,
+		RepoFiles:          repoFiles,
+		Framework:          framework,
 	})
 }
 

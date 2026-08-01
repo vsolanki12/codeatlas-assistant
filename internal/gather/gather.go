@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/vsolanki12/codeatlas-assistant/internal/atlas"
@@ -94,7 +95,8 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 		fmt.Fprintln(os.Stderr, "--- Style reference loaded ---")
 	}
 
-	controllers := extractControllers(atlasData.String())
+	controllers := extractControllers(atlasData.String(), a)
+	rankControllers(controllers, terms)
 
 	return Result{
 		AtlasData:   atlasData.String(),
@@ -104,7 +106,7 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 	}
 }
 
-func extractControllers(data string) []ControllerInfo {
+func extractControllers(data string, a atlas.Runner) []ControllerInfo {
 	matches := controllerWithPathPattern.FindAllStringSubmatch(data, -1)
 	seen := make(map[string]bool)
 	var controllers []ControllerInfo
@@ -114,13 +116,53 @@ func extractControllers(data string) []ControllerInfo {
 			continue
 		}
 		seen[id] = true
-		role := "api"
-		if strings.Contains(file, "control-plane-operator/") {
-			role = "workload"
-		}
+		role := classifyController(a, id)
 		controllers = append(controllers, ControllerInfo{ID: id, File: file, Role: role})
 	}
 	return controllers
+}
+
+func rankControllers(controllers []ControllerInfo, terms []string) {
+	sort.SliceStable(controllers, func(i, j int) bool {
+		si := controllerTermScore(controllers[i], terms)
+		sj := controllerTermScore(controllers[j], terms)
+		if controllers[i].Role != controllers[j].Role {
+			return controllers[i].Role == "workload"
+		}
+		return si > sj
+	})
+}
+
+func controllerTermScore(c ControllerInfo, terms []string) int {
+	target := strings.ToLower(c.ID + " " + c.File)
+	score := 0
+	for _, t := range terms {
+		if strings.Contains(target, strings.ToLower(t)) {
+			score++
+		}
+	}
+	return score
+}
+
+func classifyController(a atlas.Runner, controllerID string) string {
+	name := controllerID
+	if idx := strings.LastIndex(name, "."); idx != -1 {
+		name = name[idx+1:]
+	}
+	name = strings.TrimPrefix(name, "controller:")
+
+	result, err := a.Run("investigate", name)
+	if err != nil || result == "" {
+		return "unknown"
+	}
+	lower := strings.ToLower(result)
+	if strings.Contains(lower, "creates") &&
+		(strings.Contains(lower, "deployment") ||
+			strings.Contains(lower, "statefulset") ||
+			strings.Contains(lower, "daemonset")) {
+		return "workload"
+	}
+	return "api"
 }
 
 func discoverControllers(a atlas.Runner, atlasData *strings.Builder) {

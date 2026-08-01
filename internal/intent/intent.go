@@ -91,16 +91,6 @@ func ExtractEntity(question string) string {
 var allUpperPattern = regexp.MustCompile(`^[A-Z]+$`)
 var parentheticalPattern = regexp.MustCompile(`([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s*\(([A-Z]{2,6})\)`)
 
-var hypershiftAcronyms = map[string]string{
-	"CPO": "ControlPlaneOperator",
-	"HO":  "HypershiftOperator",
-	"HCP": "HostedControlPlane",
-	"KAS": "KubeAPIServer",
-	"KCM": "KubeControllerManager",
-	"OCM": "OpenShiftControllerManager",
-	"OAPI": "OpenShiftAPIServer",
-}
-
 var technicalPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`[A-Z][a-z]+(?:[A-Z][a-z]+)+`),
 	regexp.MustCompile(`\b[a-z]+(?:[A-Z][a-z]+)+`),
@@ -168,12 +158,7 @@ func ExtractTechnicalTerms(text string) []string {
 
 		isAcronym := len(clean) >= 2 && clean == strings.ToUpper(clean) && allUpperPattern.MatchString(clean)
 		if isAcronym {
-			if expanded, ok := hypershiftAcronyms[clean]; ok {
-				addTerm(expanded)
-			}
-			if len(clean) >= 2 {
-				addTerm(clean)
-			}
+			addTerm(clean)
 			continue
 		}
 
