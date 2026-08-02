@@ -53,7 +53,7 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions string, forceSolv
 			}
 		}
 
-		ws := workingset.Build(repoPath, atlasData, "", workloadFile, framework)
+		ws := workingset.Build(repoPath, atlasData, "", workloadFile, jiraText, framework)
 		fmt.Fprintf(os.Stderr, "--- Working set: %d files, %d chars ---\n",
 			len(ws.ImplFiles)+len(ws.TestFiles), ws.TotalChars())
 

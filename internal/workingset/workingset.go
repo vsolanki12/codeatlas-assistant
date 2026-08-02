@@ -23,7 +23,7 @@ type WorkingSet struct {
 	Functions  []string
 }
 
-func Build(repoPath, atlasData, apiTypes, controllerFile string, framework *prompt.FrameworkInfo) *WorkingSet {
+func Build(repoPath, atlasData, apiTypes, controllerFile, jiraText string, framework *prompt.FrameworkInfo) *WorkingSet {
 	ws := &WorkingSet{
 		Types: apiTypes,
 	}
@@ -33,6 +33,10 @@ func Build(repoPath, atlasData, apiTypes, controllerFile string, framework *prom
 
 	if framework != nil {
 		relevant := extractReferencedComponents(atlasData, framework.RelPath)
+		jiraComponents := extractJIRAComponents(jiraText, framework)
+		for k := range jiraComponents {
+			relevant[k] = true
+		}
 		ws.ImplFiles = loadComponentFiles(repoPath, framework, relevant)
 	}
 
@@ -142,6 +146,37 @@ func loadComponentFiles(repoPath string, framework *prompt.FrameworkInfo, releva
 		}
 	}
 	return files
+}
+
+func extractJIRAComponents(jiraText string, framework *prompt.FrameworkInfo) map[string]bool {
+	components := make(map[string]bool)
+	lower := strings.ToLower(jiraText)
+
+	for _, line := range strings.Split(framework.Components, "\n") {
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) < 1 {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimSuffix(parts[0], "/"))
+		if name == "" {
+			continue
+		}
+
+		variants := []string{
+			name,
+			strings.ReplaceAll(name, "_", "-"),
+			strings.ReplaceAll(name, "_", " "),
+			strings.ReplaceAll(name, "_", ""),
+		}
+		for _, v := range variants {
+			if strings.Contains(lower, v) {
+				components[name] = true
+				break
+			}
+		}
+	}
+
+	return components
 }
 
 var filePathPattern = regexp.MustCompile(`(?:^|\s|/)(\S+\.go)(?::\d+)?`)

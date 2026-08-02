@@ -74,7 +74,7 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 	}
 
 	if distillOnly && repoPath != "" {
-		ws := workingset.Build(repoPath, focusedData, apiTypes, workloadFile, framework)
+		ws := workingset.Build(repoPath, focusedData, apiTypes, workloadFile, jiraText, framework)
 		manifest := buildManifest(workload, ws, framework, apiTypeFiles)
 		manifestPath := strings.TrimSuffix(outputFile, filepath.Ext(outputFile)) + "-manifest.json"
 		writeManifest(manifestPath, manifest)
@@ -87,7 +87,7 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 
 	var p string
 	if repoPath != "" {
-		ws := workingset.Build(repoPath, focusedData, apiTypes, workloadFile, framework)
+		ws := workingset.Build(repoPath, focusedData, apiTypes, workloadFile, jiraText, framework)
 		fmt.Fprintf(os.Stderr, "--- Working set: %d files, %d chars ---\n",
 			len(ws.ImplFiles)+len(ws.TestFiles), ws.TotalChars())
 
