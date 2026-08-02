@@ -112,6 +112,9 @@ func extractControllers(data string, a atlas.Runner) []ControllerInfo {
 	var controllers []ControllerInfo
 	for _, m := range matches {
 		id, file := m[1], m[2]
+		if idx := strings.LastIndex(file, ":"); idx > 0 {
+			file = file[:idx]
+		}
 		if seen[id] {
 			continue
 		}
