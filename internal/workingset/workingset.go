@@ -31,16 +31,7 @@ func Build(repoPath, atlasData, apiTypes, controllerFile, jiraText string, frame
 	functions := extractFunctions(atlasData)
 	ws.Functions = functions
 
-	if framework != nil {
-		relevant := extractReferencedComponents(atlasData, framework.RelPath)
-		jiraComponents := extractJIRAComponents(jiraText, framework)
-		for k := range jiraComponents {
-			relevant[k] = true
-		}
-		ws.ImplFiles = loadComponentFiles(repoPath, framework, relevant)
-	}
-
-	if controllerFile != "" && len(ws.ImplFiles) == 0 {
+	if controllerFile != "" {
 		absPath := filepath.Join(repoPath, controllerFile)
 		code := readFileCapped(absPath, 500)
 		if code != "" {
@@ -48,7 +39,7 @@ func Build(repoPath, atlasData, apiTypes, controllerFile, jiraText string, frame
 		}
 	}
 
-	if controllerFile != "" && framework != nil {
+	if controllerFile != "" {
 		absPath := filepath.Join(repoPath, controllerFile)
 		content, err := os.ReadFile(absPath)
 		if err == nil {
@@ -64,6 +55,16 @@ func Build(repoPath, atlasData, apiTypes, controllerFile, jiraText string, frame
 				}
 			}
 		}
+	}
+
+	if framework != nil {
+		relevant := extractReferencedComponents(atlasData, framework.RelPath)
+		jiraComponents := extractJIRAComponents(jiraText, framework)
+		for k := range jiraComponents {
+			relevant[k] = true
+		}
+		componentFiles := loadComponentFiles(repoPath, framework, relevant)
+		ws.ImplFiles = append(ws.ImplFiles, componentFiles...)
 	}
 
 	testDirs := make(map[string]bool)
