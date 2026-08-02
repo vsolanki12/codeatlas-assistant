@@ -32,7 +32,8 @@ func Build(repoPath, atlasData, apiTypes, controllerFile string, framework *prom
 	ws.Functions = functions
 
 	if framework != nil {
-		ws.ImplFiles = loadComponentFiles(repoPath, framework)
+		relevant := extractReferencedComponents(atlasData, framework.RelPath)
+		ws.ImplFiles = loadComponentFiles(repoPath, framework, relevant)
 	}
 
 	if controllerFile != "" && len(ws.ImplFiles) == 0 {
@@ -95,8 +96,13 @@ func (ws *WorkingSet) TotalChars() int {
 	return total
 }
 
-func loadComponentFiles(repoPath string, framework *prompt.FrameworkInfo) []FileContent {
-	var files []FileContent
+func loadComponentFiles(repoPath string, framework *prompt.FrameworkInfo, relevant map[string]bool) []FileContent {
+	type compInfo struct {
+		name         string
+		workloadFile string
+	}
+
+	var matched, unmatched []compInfo
 	for _, line := range strings.Split(framework.Components, "\n") {
 		parts := strings.SplitN(line, "|", 3)
 		if len(parts) < 2 {
@@ -113,18 +119,60 @@ func loadComponentFiles(repoPath string, framework *prompt.FrameworkInfo) []File
 			continue
 		}
 
-		relPath := filepath.Join(framework.RelPath, compName, workloadFile)
+		ci := compInfo{name: compName, workloadFile: workloadFile}
+		if relevant[compName] {
+			matched = append(matched, ci)
+		} else {
+			unmatched = append(unmatched, ci)
+		}
+	}
+
+	ordered := append(matched, unmatched...)
+
+	var files []FileContent
+	for _, ci := range ordered {
+		relPath := filepath.Join(framework.RelPath, ci.name, ci.workloadFile)
 		absPath := filepath.Join(repoPath, relPath)
 		code := readFileCapped(absPath, 300)
 		if code != "" {
 			files = append(files, FileContent{Path: relPath, Code: code})
 		}
-
 		if len(files) >= 5 {
 			break
 		}
 	}
 	return files
+}
+
+var filePathPattern = regexp.MustCompile(`(?:^|\s|/)(\S+\.go)(?::\d+)?`)
+var packagePattern = regexp.MustCompile(`(?:function|package):(\w+)\.`)
+
+func extractReferencedComponents(atlasData, frameworkPath string) map[string]bool {
+	components := make(map[string]bool)
+	frameworkParts := strings.Split(frameworkPath, "/")
+
+	for _, match := range filePathPattern.FindAllStringSubmatch(atlasData, -1) {
+		path := match[1]
+		if !strings.Contains(path, frameworkPath) {
+			continue
+		}
+		parts := strings.Split(path, "/")
+		for i, p := range parts {
+			if i+1 < len(parts) && i >= len(frameworkParts) {
+				components[p] = true
+				break
+			}
+		}
+	}
+
+	for _, match := range packagePattern.FindAllStringSubmatch(atlasData, -1) {
+		pkg := match[1]
+		if len(pkg) >= 2 {
+			components[pkg] = true
+		}
+	}
+
+	return components
 }
 
 var funcEntityPattern = regexp.MustCompile(`function:\w+\.(?:\w+\.)?(\w+)`)

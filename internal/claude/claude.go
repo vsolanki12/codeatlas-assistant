@@ -15,7 +15,7 @@ import (
 	"github.com/vsolanki12/codeatlas-assistant/internal/workingset"
 )
 
-func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repoPath string) {
+func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repoPath string, distillOnly bool) {
 	result := gather.FromJIRA(a, jiraText)
 
 	atlasData := result.AtlasData
@@ -51,9 +51,10 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 	}
 
 	apiTypes := ""
+	var apiTypeFiles []string
 	if repoPath != "" {
 		reconcilesCRD := parseReconciles(focusedData)
-		apiTypes = gatherAPITypes(repoPath, result.Terms, reconcilesCRD)
+		apiTypes, apiTypeFiles = gatherAPITypesWithFiles(repoPath, result.Terms, reconcilesCRD)
 		if apiTypes != "" {
 			fmt.Fprintf(os.Stderr, "--- API types loaded: %d chars ---\n", len(apiTypes))
 		}
@@ -70,6 +71,16 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 		fmt.Fprintf(os.Stderr, "error writing claude prompt: %v\n", err)
 	} else {
 		fmt.Fprintf(os.Stderr, "--- Claude prompt saved: %s ---\n", outputFile)
+	}
+
+	if distillOnly && repoPath != "" {
+		ws := workingset.Build(repoPath, focusedData, apiTypes, workloadFile, framework)
+		manifest := buildManifest(workload, ws, framework, apiTypeFiles)
+		manifestPath := strings.TrimSuffix(outputFile, filepath.Ext(outputFile)) + "-manifest.json"
+		writeManifest(manifestPath, manifest)
+		return
+	} else if distillOnly {
+		return
 	}
 
 	fmt.Fprintln(os.Stderr, "--- Generating solution ---")
@@ -203,17 +214,19 @@ func parseReconciles(data string) string {
 	return ""
 }
 
-func gatherAPITypes(repoPath string, terms []string, reconcilesCRD string) string {
+func gatherAPITypesWithFiles(repoPath string, terms []string, reconcilesCRD string) (string, []string) {
 	searchTerms := filterCamelCase(terms)
 	if reconcilesCRD != "" {
 		searchTerms = append(searchTerms, reconcilesCRD+"Spec")
 	}
 	if len(searchTerms) == 0 {
-		return ""
+		return "", nil
 	}
 
 	var result strings.Builder
 	seen := make(map[string]bool)
+	filesSeen := make(map[string]bool)
+	var typeFiles []string
 
 	for _, term := range searchTerms {
 		files := findTypeFiles(repoPath, term)
@@ -223,6 +236,11 @@ func gatherAPITypes(repoPath string, terms []string, reconcilesCRD string) strin
 				continue
 			}
 			seen[key] = true
+
+			if !filesSeen[rel] {
+				filesSeen[rel] = true
+				typeFiles = append(typeFiles, rel)
+			}
 
 			content, err := os.ReadFile(filepath.Join(repoPath, rel))
 			if err != nil {
@@ -236,9 +254,9 @@ func gatherAPITypes(repoPath string, terms []string, reconcilesCRD string) strin
 	}
 
 	if result.Len() > 8000 {
-		return result.String()[:8000] + "\n// ... (truncated)\n"
+		return result.String()[:8000] + "\n// ... (truncated)\n", typeFiles
 	}
-	return result.String()
+	return result.String(), typeFiles
 }
 
 func filterCamelCase(terms []string) []string {

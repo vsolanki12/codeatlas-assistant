@@ -30,6 +30,7 @@ func main() {
 	styleFile := flag.String("style-file", "", "Go file to use as style reference (auto-detect if empty)")
 	conventionsFile := flag.String("conventions", "", "conventions file (embedded default if empty)")
 	forceSolve := flag.Bool("force-solve", false, "skip existing fix check in solve mode")
+	distillOnly := flag.Bool("distill-only", false, "generate XML + manifest only, skip solve step")
 	flag.Parse()
 
 	heavy := *claudeFile != "" || *solveFile != "" || *solveFlag != "" || *generateFlag != ""
@@ -53,7 +54,7 @@ func main() {
 		if out == "" {
 			out = claude.DefaultOutputName(*claudeFile)
 		}
-		claude.Run(a, llm, string(data), conventions, out, *repoPath)
+		claude.Run(a, llm, string(data), conventions, out, *repoPath, *distillOnly)
 		return
 	}
 
@@ -68,7 +69,7 @@ func main() {
 			if out == "" {
 				out = claude.DefaultOutputName(*solveFile)
 			}
-			claude.Run(a, llm, string(data), conventions, out, *repoPath)
+			claude.Run(a, llm, string(data), conventions, out, *repoPath, *distillOnly)
 		} else {
 			solve.Run(a, llm, string(data), conventions, *forceSolve, *repoPath)
 		}
@@ -81,7 +82,7 @@ func main() {
 			if out == "" {
 				out = "claude-prompt.xml"
 			}
-			claude.Run(a, llm, *solveFlag, conventions, out, *repoPath)
+			claude.Run(a, llm, *solveFlag, conventions, out, *repoPath, *distillOnly)
 		} else {
 			solve.Run(a, llm, *solveFlag, conventions, *forceSolve, *repoPath)
 		}
@@ -226,7 +227,7 @@ func runREPL(a atlas.Runner, llm ollama.LLM, conventions string) {
 		} else if strings.HasPrefix(input, "claude:") {
 			jiraText := strings.TrimSpace(strings.TrimPrefix(input, "claude:"))
 			if jiraText != "" {
-				claude.Run(a, llm, jiraText, conventions, "claude-prompt.xml", "")
+				claude.Run(a, llm, jiraText, conventions, "claude-prompt.xml", "", false)
 			}
 		} else if strings.HasPrefix(input, "gen:") {
 			desc := strings.TrimSpace(strings.TrimPrefix(input, "gen:"))
