@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/vsolanki12/codeatlas-assistant/internal/gather"
 	"github.com/vsolanki12/codeatlas-assistant/internal/ollama"
 	"github.com/vsolanki12/codeatlas-assistant/internal/prompt"
+	"github.com/vsolanki12/codeatlas-assistant/internal/workingset"
 )
 
 func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repoPath string) {
@@ -32,14 +32,15 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 		if repoFiles != "" {
 			fmt.Fprintf(os.Stderr, "--- Repo file tree loaded: %d files ---\n", strings.Count(repoFiles, "\n"))
 		}
-		framework = detectFramework(repoPath)
+		framework = workingset.DetectFramework(repoPath)
 		if framework != nil {
 			fmt.Fprintf(os.Stderr, "--- Framework detected: %s (%d components) ---\n", framework.RelPath, framework.Count)
-			promoteFrameworkController(entries, framework.RelPath)
+			workingset.PromoteFrameworkController(entries, framework.RelPath)
 		}
 	}
 
 	workload := findWorkload(entries)
+	workloadFile := findWorkloadFile(entries)
 	focusedData := atlasData
 	if workload != "" {
 		fmt.Fprintf(os.Stderr, "--- Workload controller: %s ---\n", workload)
@@ -72,11 +73,31 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 	}
 
 	fmt.Fprintln(os.Stderr, "--- Generating solution ---")
-	solveFiles := filterRepoTree(repoFiles, atlasData)
-	p := prompt.BuildSolve(jiraText, atlasData, conventions, result.StyleCode, apiTypes, solveFiles)
+
+	var p string
+	if repoPath != "" {
+		ws := workingset.Build(repoPath, focusedData, apiTypes, workloadFile, framework)
+		fmt.Fprintf(os.Stderr, "--- Working set: %d files, %d chars ---\n",
+			len(ws.ImplFiles)+len(ws.TestFiles), ws.TotalChars())
+
+		implFiles := toPromptFiles(ws.ImplFiles)
+		testFiles := toPromptFiles(ws.TestFiles)
+		p = prompt.BuildWorkingSetSolve(jiraText, conventions, workload, ws.Functions, implFiles, testFiles, ws.Types)
+	} else {
+		p = prompt.BuildSolve(jiraText, atlasData, conventions, result.StyleCode, apiTypes, "")
+	}
+
 	if err := llm.Generate(p); err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
 	}
+}
+
+func toPromptFiles(files []workingset.FileContent) []prompt.FileContent {
+	out := make([]prompt.FileContent, len(files))
+	for i, f := range files {
+		out[i] = prompt.FileContent{Path: f.Path, Code: f.Code}
+	}
+	return out
 }
 
 func toEntries(controllers []gather.ControllerInfo) []prompt.ControllerEntry {
@@ -91,6 +112,15 @@ func findWorkload(entries []prompt.ControllerEntry) string {
 	for _, e := range entries {
 		if e.Role == "workload" {
 			return e.ID
+		}
+	}
+	return ""
+}
+
+func findWorkloadFile(entries []prompt.ControllerEntry) string {
+	for _, e := range entries {
+		if e.Role == "workload" {
+			return e.File
 		}
 	}
 	return ""
@@ -156,154 +186,11 @@ func walkRepo(root string) string {
 	return strings.Join(files, "\n")
 }
 
-func detectFramework(repoRoot string) *prompt.FrameworkInfo {
-	parentCounts := make(map[string][]string)
-
-	filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if info.IsDir() {
-			if skipDirs[info.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if info.Name() == "component.go" {
-			dir := filepath.Dir(path)
-			parent := filepath.Dir(dir)
-			rel, err := filepath.Rel(repoRoot, dir)
-			if err != nil {
-				return nil
-			}
-			parentRel, _ := filepath.Rel(repoRoot, parent)
-			parentCounts[parentRel] = append(parentCounts[parentRel], rel)
-		}
-		return nil
-	})
-
-	var bestParent string
-	var bestChildren []string
-	for parent, children := range parentCounts {
-		if len(children) > len(bestChildren) {
-			bestParent = parent
-			bestChildren = children
-		}
-	}
-
-	if len(bestChildren) < 3 {
-		return nil
-	}
-
-	var lines []string
-	for _, compDir := range bestChildren {
-		name := filepath.Base(compDir)
-		absDir := filepath.Join(repoRoot, compDir)
-		goFiles, err := os.ReadDir(absDir)
-		if err != nil {
-			continue
-		}
-
-		workloadType := ""
-		var fileNames []string
-		for _, f := range goFiles {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".go") {
-				continue
-			}
-			if strings.HasSuffix(f.Name(), "_test.go") {
-				continue
-			}
-			fileNames = append(fileNames, f.Name())
-			switch f.Name() {
-			case "deployment.go":
-				workloadType = "Deployment"
-			case "statefulset.go":
-				workloadType = "StatefulSet"
-			}
-		}
-		if len(fileNames) == 0 {
-			continue
-		}
-		if workloadType == "" {
-			workloadType = "Other"
-		}
-		lines = append(lines, fmt.Sprintf("%s/ | %s | %s",
-			name, workloadType, strings.Join(fileNames, " ")))
-	}
-
-	return &prompt.FrameworkInfo{
-		RelPath:    bestParent,
-		Components: strings.Join(lines, "\n"),
-		Count:      len(lines),
-	}
-}
-
-func promoteFrameworkController(entries []prompt.ControllerEntry, frameworkPath string) {
-	bestIdx := -1
-	bestLen := 0
-	for i, e := range entries {
-		p := commonPathPrefix(e.File, frameworkPath)
-		if len(p) > bestLen {
-			bestLen = len(p)
-			bestIdx = i
-		}
-	}
-	if bestIdx > 0 && bestLen > 0 {
-		entries[bestIdx].Role = "workload"
-		promoted := entries[bestIdx]
-		copy(entries[1:bestIdx+1], entries[0:bestIdx])
-		entries[0] = promoted
-	}
-}
-
-func commonPathPrefix(a, b string) string {
-	ap := strings.Split(a, "/")
-	bp := strings.Split(b, "/")
-	var common []string
-	for i := 0; i < len(ap) && i < len(bp); i++ {
-		if ap[i] != bp[i] {
-			break
-		}
-		common = append(common, ap[i])
-	}
-	return strings.Join(common, "/")
-}
-
 func DefaultOutputName(inputFile string) string {
 	base := filepath.Base(inputFile)
 	ext := filepath.Ext(base)
 	name := strings.TrimSuffix(base, ext)
 	return name + "-claude.xml"
-}
-
-var goPathPattern = regexp.MustCompile(`(?:^|[\s(])([a-zA-Z][\w/.-]*\.go)`)
-
-func filterRepoTree(fullTree, atlasData string) string {
-	dirs := make(map[string]bool)
-	for _, match := range goPathPattern.FindAllStringSubmatch(atlasData, -1) {
-		dir := filepath.Dir(match[1])
-		for dir != "." && dir != "" {
-			dirs[dir] = true
-			dir = filepath.Dir(dir)
-		}
-	}
-
-	if len(dirs) == 0 {
-		return fullTree
-	}
-
-	var filtered []string
-	for _, line := range strings.Split(fullTree, "\n") {
-		if line == "" {
-			continue
-		}
-		dir := filepath.Dir(line)
-		if dirs[dir] {
-			filtered = append(filtered, line)
-		}
-	}
-
-	return strings.Join(filtered, "\n")
 }
 
 func parseReconciles(data string) string {

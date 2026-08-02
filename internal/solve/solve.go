@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/vsolanki12/codeatlas-assistant/internal/atlas"
@@ -14,6 +12,7 @@ import (
 	"github.com/vsolanki12/codeatlas-assistant/internal/ollama"
 	"github.com/vsolanki12/codeatlas-assistant/internal/prompt"
 	"github.com/vsolanki12/codeatlas-assistant/internal/style"
+	"github.com/vsolanki12/codeatlas-assistant/internal/workingset"
 )
 
 var jiraIDPattern = regexp.MustCompile(`[A-Z]+-\d+`)
@@ -33,86 +32,57 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions string, forceSolv
 		atlasData = "(no atlas data available)"
 	}
 
-	repoFiles := ""
-	if repoPath != "" {
-		full := walkRepo(repoPath)
-		repoFiles = filterRepoTree(full, atlasData)
-		if repoFiles != "" {
-			fmt.Fprintf(os.Stderr, "--- Repo file tree loaded: %d files (filtered from %d) ---\n",
-				strings.Count(repoFiles, "\n"), strings.Count(full, "\n"))
-		}
-	}
-
 	fmt.Fprintln(os.Stderr, "--- Generating solution ---")
-	p := prompt.BuildSolve(jiraText, atlasData, conventions, result.StyleCode, "", repoFiles)
+
+	var p string
+	if repoPath != "" {
+		entries := toEntries(result.Controllers)
+		framework := workingset.DetectFramework(repoPath)
+		if framework != nil {
+			fmt.Fprintf(os.Stderr, "--- Framework detected: %s (%d components) ---\n", framework.RelPath, framework.Count)
+			workingset.PromoteFrameworkController(entries, framework.RelPath)
+		}
+
+		workload := ""
+		workloadFile := ""
+		for _, e := range entries {
+			if e.Role == "workload" {
+				workload = e.ID
+				workloadFile = e.File
+				break
+			}
+		}
+
+		ws := workingset.Build(repoPath, atlasData, "", workloadFile, framework)
+		fmt.Fprintf(os.Stderr, "--- Working set: %d files, %d chars ---\n",
+			len(ws.ImplFiles)+len(ws.TestFiles), ws.TotalChars())
+
+		implFiles := toPromptFiles(ws.ImplFiles)
+		testFiles := toPromptFiles(ws.TestFiles)
+		p = prompt.BuildWorkingSetSolve(jiraText, conventions, workload, ws.Functions, implFiles, testFiles, ws.Types)
+	} else {
+		p = prompt.BuildSolve(jiraText, atlasData, conventions, result.StyleCode, "", "")
+	}
 
 	if err := llm.Generate(p); err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
 	}
 }
 
-var skipDirs = map[string]bool{
-	"vendor": true, ".git": true, "_output": true, "client": true,
-	"hack": true, "bin": true, "node_modules": true,
+func toEntries(controllers []gather.ControllerInfo) []prompt.ControllerEntry {
+	entries := make([]prompt.ControllerEntry, len(controllers))
+	for i, c := range controllers {
+		entries[i] = prompt.ControllerEntry{ID: c.ID, File: c.File, Role: c.Role}
+	}
+	return entries
 }
 
-func walkRepo(root string) string {
-	var files []string
-	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if info.IsDir() {
-			if skipDirs[info.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(info.Name(), ".go") {
-			return nil
-		}
-		if strings.HasPrefix(info.Name(), "zz_generated") {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
-		}
-		files = append(files, rel)
-		return nil
-	})
-	sort.Strings(files)
-	return strings.Join(files, "\n")
-}
-
-var goPathPattern = regexp.MustCompile(`(?:^|[\s(])([a-zA-Z][\w/.-]*\.go)`)
-
-func filterRepoTree(fullTree, atlasData string) string {
-	dirs := make(map[string]bool)
-	for _, match := range goPathPattern.FindAllStringSubmatch(atlasData, -1) {
-		dir := filepath.Dir(match[1])
-		for dir != "." && dir != "" {
-			dirs[dir] = true
-			dir = filepath.Dir(dir)
-		}
+func toPromptFiles(files []workingset.FileContent) []prompt.FileContent {
+	out := make([]prompt.FileContent, len(files))
+	for i, f := range files {
+		out[i] = prompt.FileContent{Path: f.Path, Code: f.Code}
 	}
-
-	if len(dirs) == 0 {
-		return fullTree
-	}
-
-	var filtered []string
-	for _, line := range strings.Split(fullTree, "\n") {
-		if line == "" {
-			continue
-		}
-		dir := filepath.Dir(line)
-		if dirs[dir] {
-			filtered = append(filtered, line)
-		}
-	}
-
-	return strings.Join(filtered, "\n")
+	return out
 }
 
 func checkExistingFix(jiraText, repoRoot string) bool {

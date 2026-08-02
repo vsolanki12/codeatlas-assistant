@@ -1,3 +1,60 @@
+{{- if .ImplFiles}}
+The implementation point has been identified by CodeAtlas graph analysis.
+
+You MUST NOT choose another file or package.
+You MUST NOT invent helper functions or new packages.
+You MUST NOT invent file paths.
+If you cannot complete the implementation with the provided context,
+respond ONLY with NEED_MORE_CONTEXT and explain what is missing.
+
+## JIRA Description
+{{.JiraText}}
+
+## Implementation Point
+{{- if .Controller}}
+Controller: {{.Controller}}
+{{- end}}
+{{- if .Functions}}
+Functions to modify: {{.Functions}}
+{{- end}}
+
+{{- range .ImplFiles}}
+
+### {{.Path}}
+```go
+{{.Code}}
+```
+{{- end}}
+
+{{- if .Types}}
+
+## Relevant Type Definitions
+```go
+{{.Types}}
+```
+{{- end}}
+
+{{- range .TestFiles}}
+
+### Tests: {{.Path}}
+```go
+{{.Code}}
+```
+{{- end}}
+
+{{- if .Conventions}}
+
+## Conventions
+{{.Conventions}}
+{{- end}}
+
+## Task
+Modify ONLY the files and functions shown above to resolve this JIRA.
+- Show the complete modified function(s) with full signatures
+- Follow the exact patterns in the existing code
+- If new tests are needed, follow the existing test patterns shown above
+- Do NOT create new files unless absolutely necessary
+{{- else}}
 You are a senior Kubernetes/HyperShift engineer solving a JIRA issue.
 
 Using the JIRA description, CodeAtlas architecture data, engineering conventions, and style reference below, provide:
@@ -53,3 +110,4 @@ Do NOT invent or guess file paths.
 {{- end}}
 
 ## Solution
+{{- end}}

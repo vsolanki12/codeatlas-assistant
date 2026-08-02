@@ -3,6 +3,7 @@ package prompt
 import (
 	"bytes"
 	"embed"
+	"strings"
 	"text/template"
 )
 
@@ -16,13 +17,25 @@ type AskData struct {
 	AtlasOutput string
 }
 
+type FileContent struct {
+	Path string
+	Code string
+}
+
 type SolveData struct {
 	JiraText    string
-	AtlasData   string
 	Conventions string
-	StyleCode   string
-	APITypes    string
-	RepoFiles   string
+	// Working set fields (used when --repo provided)
+	Controller string
+	Functions  string
+	ImplFiles  []FileContent
+	TestFiles  []FileContent
+	Types      string
+	// Legacy fields (used when no --repo)
+	AtlasData string
+	StyleCode string
+	APITypes  string
+	RepoFiles string
 }
 
 type ControllerEntry struct {
@@ -71,6 +84,18 @@ func BuildSolve(jiraText, atlasData, conventions, styleCode, apiTypes, repoFiles
 		StyleCode:   styleCode,
 		APITypes:    apiTypes,
 		RepoFiles:   repoFiles,
+	})
+}
+
+func BuildWorkingSetSolve(jiraText, conventions, controller string, functions []string, implFiles, testFiles []FileContent, types string) string {
+	return execute("solve.tmpl", SolveData{
+		JiraText:    jiraText,
+		Conventions: conventions,
+		Controller:  controller,
+		Functions:   strings.Join(functions, ", "),
+		ImplFiles:   implFiles,
+		TestFiles:   testFiles,
+		Types:       types,
 	})
 }
 
