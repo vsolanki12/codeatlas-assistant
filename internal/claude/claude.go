@@ -125,6 +125,9 @@ func findWorkload(entries []prompt.ControllerEntry) string {
 			return e.ID
 		}
 	}
+	if len(entries) > 0 {
+		return entries[0].ID
+	}
 	return ""
 }
 
@@ -133,6 +136,9 @@ func findWorkloadFile(entries []prompt.ControllerEntry) string {
 		if e.Role == "workload" {
 			return e.File
 		}
+	}
+	if len(entries) > 0 {
+		return entries[0].File
 	}
 	return ""
 }
