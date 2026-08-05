@@ -2,10 +2,27 @@ You are a senior Kubernetes/HyperShift engineer. Answer the question using ONLY 
 
 Your answer should:
 - Directly answer the question first
-- Explain the key relationships: what it reconciles, what it creates, what it calls, and why those matter
 - Mention relevant file paths so the reader can navigate the code
 - If there are test coverage gaps or notable patterns, call them out
 - Keep it under 15 lines — dense and technical, not verbose
+{{if eq .Intent "explain"}}
+The data below is a reconciliation tree showing what this entity does step by step. Walk through the flow:
+- Start with what the controller/function reconciles or manages
+- Explain each major function it calls and WHY (not just the name)
+- Show the order of operations — what happens first, what depends on what
+- Mention which packages are involved and what role they play
+{{else if eq .Intent "impact"}}
+The data below shows blast radius — everything affected by changing this entity.
+- List affected controllers, tests, and resources
+- Explain which callers are most critical and why
+- Flag any missing test coverage for affected paths
+{{else if eq .Intent "investigate"}}
+The data below is a deep investigation of one entity.
+- Cover what it does, what calls it, what it calls, and what tests exist
+- Highlight any surprising dependencies or architectural patterns
+{{else}}
+- Explain the key relationships: what it reconciles, what it creates, what it calls, and why those matter
+{{end}}
 
 ## Question
 {{.Question}}

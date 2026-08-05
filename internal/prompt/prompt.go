@@ -15,6 +15,7 @@ var templates = template.Must(template.ParseFS(templateFS, "templates/*.tmpl"))
 type AskData struct {
 	Question    string
 	AtlasOutput string
+	Intent      string
 }
 
 type FileContent struct {
@@ -69,10 +70,11 @@ type GenerateData struct {
 	StyleCode   string
 }
 
-func BuildAsk(question, atlasOutput string) string {
+func BuildAsk(question, atlasOutput, intent string) string {
 	return execute("ask.tmpl", AskData{
 		Question:    question,
 		AtlasOutput: atlasOutput,
+		Intent:      intent,
 	})
 }
 

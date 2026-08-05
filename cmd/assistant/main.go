@@ -170,7 +170,7 @@ func handleQuestion(a atlas.Runner, llm ollama.LLM, question string) {
 		os.Exit(1)
 	}
 
-	p := prompt.BuildAsk(question, atlasOutput)
+	p := prompt.BuildAsk(question, atlasOutput, i.String())
 
 	if err := llm.Generate(p); err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
