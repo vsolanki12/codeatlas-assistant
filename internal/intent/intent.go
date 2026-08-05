@@ -73,9 +73,18 @@ var intentWords = map[string]bool{
 	"stats": true, "statistics": true, "count": true,
 	"blast": true, "radius": true, "change": true,
 	"deep": true, "dive": true, "all": true,
+	"reconciles": true, "reconcile": true, "reconciling": true,
+	"creates": true, "create": true, "calls": true, "call": true,
+	"handles": true, "handle": true, "manages": true, "manage": true,
+	"watches": true, "watch": true, "uses": true, "use": true,
 }
 
 func ExtractEntity(question string) string {
+	for _, pat := range technicalPatterns {
+		if m := pat.FindString(question); m != "" {
+			return strings.Trim(m, "?!.,;:'\"")
+		}
+	}
 	words := strings.Fields(question)
 	var kept []string
 	for _, w := range words {
@@ -83,7 +92,7 @@ func ExtractEntity(question string) string {
 		if stopWords[clean] || intentWords[clean] {
 			continue
 		}
-		kept = append(kept, w)
+		kept = append(kept, strings.Trim(w, "?!.,;:'\""))
 	}
 	return strings.Join(kept, " ")
 }
