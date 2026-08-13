@@ -118,8 +118,8 @@ func main() {
 	handleQuestion(a, llm, question)
 }
 
-var heavyModels = []string{"qwen3:30b", "qwen3:14b", "qwen3:8b", "qwen2.5-coder:14b"}
-var lightModels = []string{"qwen2.5-coder:14b", "qwen3:14b", "qwen3:8b", "qwen3:30b"}
+var heavyModels = []string{"qwen2.5-coder:32b", "qwen3:30b", "qwen3:14b", "qwen3:8b"}
+var lightModels = []string{"qwen2.5-coder:32b", "qwen3:30b", "qwen3:14b", "qwen3:8b"}
 
 func resolveModel(model string, heavy bool) (string, error) {
 	if model != "" {
