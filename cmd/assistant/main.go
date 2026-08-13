@@ -181,11 +181,11 @@ func handleQuestion(a atlas.Runner, llm ollama.LLM, question string) {
 func runForIntent(a atlas.Runner, entity string, i intent.Intent) (string, error) {
 	switch i {
 	case intent.Explain:
-		return a.Run("explain", entity)
+		return multiSource(a, entity, "explain", "investigate")
 	case intent.Impact:
-		return a.Run("impact", entity)
+		return multiSource(a, entity, "impact", "context")
 	case intent.Investigate:
-		return a.Run("investigate", entity)
+		return multiSource(a, entity, "investigate", "explain")
 	case intent.Search:
 		return a.Run("search", entity)
 	case intent.Stats:
@@ -193,6 +193,26 @@ func runForIntent(a atlas.Runner, entity string, i intent.Intent) (string, error
 	default:
 		return a.Run("ask", entity)
 	}
+}
+
+func multiSource(a atlas.Runner, entity string, commands ...string) (string, error) {
+	var combined strings.Builder
+	for _, cmd := range commands {
+		result, err := a.Run(cmd, entity)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas %s: %v (skipping)\n", cmd, err)
+			continue
+		}
+		if strings.Contains(result, "not found") || strings.Contains(result, "Empty") {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "atlas %s: %d chars\n", cmd, len(result))
+		combined.WriteString(fmt.Sprintf("### %s\n%s\n\n", cmd, result))
+	}
+	if combined.Len() == 0 {
+		return "", fmt.Errorf("no atlas data found for %q", entity)
+	}
+	return combined.String(), nil
 }
 
 func runREPL(a atlas.Runner, llm ollama.LLM, conventions string) {

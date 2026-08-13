@@ -77,7 +77,7 @@ func TestAsk_ContractStrings(t *testing.T) {
 	output := BuildAsk("what does Reconcile do?", "atlas output", "explain")
 
 	required := []string{
-		"ONLY the CodeAtlas data",
+		"ONLY facts present in the CodeAtlas data",
 	}
 	for _, s := range required {
 		if !strings.Contains(output, s) {
