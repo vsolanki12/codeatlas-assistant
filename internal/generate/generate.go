@@ -10,6 +10,7 @@ import (
 	"github.com/vsolanki12/codeatlas-assistant/internal/ollama"
 	"github.com/vsolanki12/codeatlas-assistant/internal/prompt"
 	"github.com/vsolanki12/codeatlas-assistant/internal/style"
+	"github.com/vsolanki12/codeatlas-assistant/internal/validate"
 )
 
 func Run(a atlas.Runner, llm ollama.LLM, description, styleFile, conventions string) {
@@ -56,7 +57,15 @@ func Run(a atlas.Runner, llm ollama.LLM, description, styleFile, conventions str
 	fmt.Fprintln(os.Stderr, "--- Generating code ---")
 	p := prompt.BuildGenerate(description, atlasData.String(), styleCode, conventions)
 
-	if err := llm.Generate(p); err != nil {
+	output, err := llm.GenerateString(p)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
+		return
+	}
+	fmt.Print(output)
+
+	vr := validate.Output(output, "", a)
+	if !vr.OK() {
+		fmt.Fprintf(os.Stderr, "\n--- VALIDATION WARNING ---\n%s", vr.Report())
 	}
 }

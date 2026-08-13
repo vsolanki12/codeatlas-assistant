@@ -12,6 +12,7 @@ import (
 	"github.com/vsolanki12/codeatlas-assistant/internal/gather"
 	"github.com/vsolanki12/codeatlas-assistant/internal/ollama"
 	"github.com/vsolanki12/codeatlas-assistant/internal/prompt"
+	"github.com/vsolanki12/codeatlas-assistant/internal/validate"
 	"github.com/vsolanki12/codeatlas-assistant/internal/workingset"
 )
 
@@ -67,6 +68,13 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 		fmt.Fprintf(os.Stderr, "error distilling claude prompt: %v\n", err)
 		return
 	}
+	vr := validate.ClaudeXML(distilled, repoPath, a)
+	if !vr.OK() {
+		fmt.Fprintf(os.Stderr, "--- VALIDATION WARNING ---\n%s", vr.Report())
+	} else if vr.Checked > 0 {
+		fmt.Fprintf(os.Stderr, "--- %s ---\n", vr.Report())
+	}
+
 	if err := os.WriteFile(outputFile, []byte(distilled), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "error writing claude prompt: %v\n", err)
 	} else {

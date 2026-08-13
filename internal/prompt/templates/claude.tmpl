@@ -3,11 +3,11 @@ You are an engineering assistant preparing a structured implementation prompt fo
 ## JIRA Description
 {{.JiraText}}
 
-## Controller Analysis (deterministic — DO NOT override)
+## Controller Analysis
 {{- if .WorkloadController}}
 
-WORKLOAD CONTROLLER (implementation point): {{.WorkloadController}}
-This controller was identified by atlas graph analysis as the one that creates/modifies actual workloads (Deployments, StatefulSets, container args). Your <architecture> section MUST use this controller as the implementation point.
+WORKLOAD CONTROLLER (inferred): {{.WorkloadController}}
+This controller was identified by heuristic analysis (keyword match on atlas investigate output — not a graph-proven fact). Verify it is the correct implementation point before using it.
 {{- end}}
 {{- if .Controllers}}
 
@@ -50,7 +50,7 @@ Copy the JIRA description verbatim.
 
 <architecture>
 {{- if .WorkloadController}}
-- Workload Controller: {{.WorkloadController}} (LOCKED — do not change this)
+- Workload Controller: {{.WorkloadController}} (inferred — verify before implementing)
 {{- end}}
 - API Controller: the controller that reconciles the user-facing CR (if different from workload controller)
 {{- if .Framework}}
@@ -128,4 +128,4 @@ When proposing new types or modifying existing ones, match the style and structu
 ```
 {{- end}}
 
-Now produce the Claude implementation prompt. Remember: the workload controller is LOCKED — use it as the implementation point.
+Now produce the Claude implementation prompt. The workload controller was inferred by heuristic — verify it is correct before implementing.

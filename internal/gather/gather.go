@@ -147,6 +147,9 @@ func controllerTermScore(c ControllerInfo, terms []string) int {
 	return score
 }
 
+// classifyController uses heuristic keyword matching on atlas investigate
+// output to guess whether a controller manages workloads. This is NOT a
+// graph-proven fact — the result is inferred.
 func classifyController(a atlas.Runner, controllerID string) string {
 	name := controllerID
 	if idx := strings.LastIndex(name, "."); idx != -1 {
