@@ -17,6 +17,12 @@ import (
 )
 
 func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repoPath string, distillOnly bool) {
+	if repoPath != "" {
+		if f := atlas.CheckFreshness(a, repoPath); f.Stale {
+			fmt.Fprintf(os.Stderr, "--- WARNING: %s ---\n", f.Warning())
+		}
+	}
+
 	result := gather.FromJIRA(a, jiraText)
 
 	atlasData := result.AtlasData
@@ -82,7 +88,7 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 	}
 
 	if distillOnly && repoPath != "" {
-		ws := workingset.Build(repoPath, focusedData, apiTypes, workloadFile, jiraText, framework)
+		ws := workingset.Build(repoPath, focusedData, apiTypes, workloadFile, jiraText, framework, a)
 		manifest := buildManifest(workload, ws, framework, apiTypeFiles)
 		manifestPath := strings.TrimSuffix(outputFile, filepath.Ext(outputFile)) + "-manifest.json"
 		writeManifest(manifestPath, manifest)
@@ -95,7 +101,7 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 
 	var p string
 	if repoPath != "" {
-		ws := workingset.Build(repoPath, focusedData, apiTypes, workloadFile, jiraText, framework)
+		ws := workingset.Build(repoPath, focusedData, apiTypes, workloadFile, jiraText, framework, a)
 		fmt.Fprintf(os.Stderr, "--- Working set: %d files, %d chars ---\n",
 			len(ws.ImplFiles)+len(ws.TestFiles), ws.TotalChars())
 

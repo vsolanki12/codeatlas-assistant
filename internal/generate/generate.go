@@ -14,6 +14,10 @@ import (
 )
 
 func Run(a atlas.Runner, llm ollama.LLM, description, styleFile, conventions string) {
+	if f := atlas.CheckFreshness(a, ""); f.Stale {
+		fmt.Fprintf(os.Stderr, "--- WARNING: %s ---\n", f.Warning())
+	}
+
 	fmt.Fprintln(os.Stderr, "--- Extracting context ---")
 	terms := intent.ExtractTechnicalTerms(description)
 

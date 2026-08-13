@@ -21,10 +21,15 @@ type Client struct {
 	Model string
 }
 
+type Options struct {
+	Temperature float64 `json:"temperature"`
+}
+
 type request struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Stream bool   `json:"stream"`
+	Model   string  `json:"model"`
+	Prompt  string  `json:"prompt"`
+	Stream  bool    `json:"stream"`
+	Options Options `json:"options"`
 }
 
 type response struct {

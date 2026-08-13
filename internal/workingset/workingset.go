@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/vsolanki12/codeatlas-assistant/internal/atlas"
 	"github.com/vsolanki12/codeatlas-assistant/internal/prompt"
 )
 
@@ -23,7 +24,7 @@ type WorkingSet struct {
 	Functions  []string
 }
 
-func Build(repoPath, atlasData, apiTypes, controllerFile, jiraText string, framework *prompt.FrameworkInfo) *WorkingSet {
+func Build(repoPath, atlasData, apiTypes, controllerFile, jiraText string, framework *prompt.FrameworkInfo, a ...atlas.Runner) *WorkingSet {
 	ws := &WorkingSet{
 		Types: apiTypes,
 	}
@@ -67,22 +68,33 @@ func Build(repoPath, atlasData, apiTypes, controllerFile, jiraText string, frame
 		ws.ImplFiles = append(ws.ImplFiles, componentFiles...)
 	}
 
-	testDirs := make(map[string]bool)
-	for _, f := range ws.ImplFiles {
-		dir := filepath.Dir(f.Path)
-		if !strings.Contains(dir, "→") {
-			testDirs[dir] = true
-		}
+	var runner atlas.Runner
+	if len(a) > 0 {
+		runner = a[0]
 	}
-	for dir := range testDirs {
-		tests := findTestFiles(repoPath, dir)
-		for _, t := range tests {
-			code := readFileCapped(filepath.Join(repoPath, t), 200)
-			if code != "" {
-				ws.TestFiles = append(ws.TestFiles, FileContent{Path: t, Code: code})
+
+	if runner != nil && controllerFile != "" {
+		ws.TestFiles = findTestsFromGraph(runner, repoPath, controllerFile, ws.Functions)
+	}
+
+	if len(ws.TestFiles) == 0 {
+		testDirs := make(map[string]bool)
+		for _, f := range ws.ImplFiles {
+			dir := filepath.Dir(f.Path)
+			if !strings.Contains(dir, "→") {
+				testDirs[dir] = true
 			}
-			if len(ws.TestFiles) >= 3 {
-				break
+		}
+		for dir := range testDirs {
+			tests := findTestFiles(repoPath, dir)
+			for _, t := range tests {
+				code := readFileCapped(filepath.Join(repoPath, t), 200)
+				if code != "" {
+					ws.TestFiles = append(ws.TestFiles, FileContent{Path: t, Code: code})
+				}
+				if len(ws.TestFiles) >= 3 {
+					break
+				}
 			}
 		}
 	}
@@ -158,7 +170,7 @@ func extractJIRAComponents(jiraText string, framework *prompt.FrameworkInfo) map
 		if len(parts) < 1 {
 			continue
 		}
-		name := strings.TrimSpace(strings.TrimSuffix(parts[0], "/"))
+		name := strings.TrimSuffix(strings.TrimSpace(parts[0]), "/")
 		if name == "" {
 			continue
 		}
@@ -277,6 +289,60 @@ func extractFuncBlock(content, funcName string) string {
 		return strings.Join(lines[start:end+1], "\n")
 	}
 	return ""
+}
+
+var testPathPattern = regexp.MustCompile(`(\S+_test\.go)(?::\d+)?`)
+
+func findTestsFromGraph(a atlas.Runner, repoPath string, controllerFile string, functions []string) []FileContent {
+	seen := make(map[string]bool)
+	var testPaths []string
+
+	name := filepath.Base(controllerFile)
+	name = strings.TrimSuffix(name, ".go")
+	parts := strings.Split(name, "_")
+	if len(parts) > 1 && parts[len(parts)-1] == "controller" {
+		name = parts[0]
+	}
+
+	out, err := a.Run("investigate", name)
+	if err == nil {
+		for _, match := range testPathPattern.FindAllStringSubmatch(out, -1) {
+			p := match[1]
+			if !seen[p] {
+				seen[p] = true
+				testPaths = append(testPaths, p)
+			}
+		}
+	}
+
+	for _, fn := range functions {
+		if len(testPaths) >= 3 {
+			break
+		}
+		out, err := a.Run("impact", fn)
+		if err != nil {
+			continue
+		}
+		for _, match := range testPathPattern.FindAllStringSubmatch(out, -1) {
+			p := match[1]
+			if !seen[p] {
+				seen[p] = true
+				testPaths = append(testPaths, p)
+			}
+		}
+	}
+
+	var files []FileContent
+	for _, p := range testPaths {
+		if len(files) >= 3 {
+			break
+		}
+		code := readFileCapped(filepath.Join(repoPath, p), 200)
+		if code != "" {
+			files = append(files, FileContent{Path: p, Code: code})
+		}
+	}
+	return files
 }
 
 func findTestFiles(repoPath, relDir string) []string {
