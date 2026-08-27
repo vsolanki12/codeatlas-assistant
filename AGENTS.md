@@ -2,7 +2,7 @@
 
 This file provides guidance to AI coding agents when working with code in this repository. `CLAUDE.md` is a symlink to this file so that Claude Code auto-loads it; the `AGENTS.md` name is canonical.
 
-CodeAtlas Assistant is a local-first CLI that answers natural-language questions about a codebase by grounding answers in a [CodeAtlas](https://github.com/vsolanki12/codeatlas) knowledge graph and a local Ollama LLM. It supports question answering, JIRA root-cause analysis, style-matched Go code generation, and Claude prompt distillation — all running locally with zero cloud API calls.
+CodeAtlas Assistant is a local-first CLI that answers natural-language questions about a codebase by grounding answers in a [CodeAtlas](https://github.com/vsolanki12/codeatlas) knowledge graph and a local Ollama LLM. It supports question answering, bounded supplemental PR review, JIRA root-cause analysis, style-matched Go code generation, and Claude prompt distillation — all running locally with zero cloud API calls.
 
 This file is intentionally minimal — detailed guidance lives in the referenced files below and should be updated there, not here.
 
@@ -39,7 +39,7 @@ internal/
   ollama/                       — LLM interface + Client for Ollama HTTP API (streaming)
   intent/                       — Intent detection + entity/term extraction from questions
   prompt/                       — Template-based prompt builders (embeds templates/*.tmpl)
-  prompt/templates/             — Go templates for ask, solve, generate, claude modes
+  prompt/templates/             — Go templates for ask, solve, generate, claude, review modes
   gather/                       — Shared JIRA-to-atlas data gathering pipeline
   style/                        — Style-reference file loading + repo root detection
   solve/                        — JIRA root-cause analysis mode
@@ -71,6 +71,7 @@ User Input → Intent Detection → Entity Extraction → Atlas CLI queries
 | Solve | `--solve` / `--solve-file` | JIRA description → root cause + files + approach + tests |
 | Generate | `--generate` | Go code generation with style matching from `--style-file` or auto-detect |
 | Claude | `--claude` / `--claude-file` | Distill atlas data into Claude-ready XML prompt (zero Claude tokens until paste) |
+| Review | `--review-file` | Review a bounded local PR packet for supported findings, impact, and verification gaps |
 | Interactive | `--interactive` | REPL with `solve:`, `claude:`, `gen:` prefixes |
 
 ## Testing Conventions

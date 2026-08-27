@@ -13,7 +13,7 @@ A CLI tool that lets you talk to your codebase in plain English using local LLMs
 3. **Feeds everything to a local Ollama model** — your question + the atlas data as context
 4. **Streams the answer** — no cloud APIs, everything runs locally
 
-It also has specialized modes for **analyzing JIRA issues** (paste a bug description, get root cause analysis with actual file paths) and **generating Go code** that matches your existing codebase patterns.
+It also has specialized modes for **analyzing JIRA issues** (paste a bug description, get root cause analysis with actual file paths), **generating Go code** that matches your existing codebase patterns, and running a bounded supplemental PR review.
 
 ### Why Not Just Use ChatGPT/Claude?
 
@@ -96,6 +96,24 @@ assistant --graph graph.json --claude-file jira-description.txt
 
 Output is a ready-to-paste Claude Code prompt with `<jira>`, `<architecture>`, `<files>`, `<functions>`, `<tests>`, `<constraints>`, and `<task>` sections. Zero Claude tokens consumed until you paste the output.
 
+### Supplemental PR Review Mode
+
+Review a bounded local packet containing a PR dossier, diff, repository guidance,
+Atlas evidence, and test targets:
+
+```bash
+assistant --review-file review-packet.md \
+  --graph ~/codeatlas/hypershift-graph.json \
+  --model qwen3.8:27b \
+  --num-ctx 24576 --max-output 1800
+```
+
+The output separates supported changed-line findings, architecture and impact,
+verification additions, and unknowns. The packet is treated as untrusted data;
+the assistant does not execute commands from it or modify the repository. The
+Python PR reviewer invokes this mode automatically when it finds
+`~/codeatlas-assistant/assistant`.
+
 ### Interactive REPL
 
 ```bash
@@ -150,7 +168,7 @@ internal/
   ollama/ollama.go              — LLM interface + Client for Ollama API
   intent/intent.go              — Intent detection, entity/term extraction
   prompt/prompt.go              — Template-based prompt builders
-  prompt/templates/*.tmpl       — Prompt templates (ask, solve, generate, claude)
+  prompt/templates/*.tmpl       — Prompt templates (ask, solve, generate, claude, review)
   prompt/conventions.go         — Embedded engineering conventions
   gather/gather.go              — Shared atlas data gathering pipeline
   style/style.go                — Style reference loading, repo root detection
@@ -165,12 +183,15 @@ internal/
 |------|---------|-------------|
 | `--graph` | `atlas.json` | Path to atlas graph JSON |
 | `--model` | auto-detect | Ollama model name |
+| `--num-ctx` | `24576` | Ollama context size |
+| `--max-output` | `1800` | Maximum generated tokens per pass |
 | `--interactive` | `false` | Enter REPL mode |
 | `--solve` | | JIRA description text to analyze |
 | `--solve-file` | | Path to file with JIRA description |
 | `--claude` | | JIRA text — generate Claude-optimized prompt |
 | `--claude-file` | | Path to file — generate Claude-optimized prompt |
 | `--generate` | | Description of Go code to generate |
+| `--review-file` | | Read a local PR review packet and run supplemental review |
 | `--style-file` | auto-detect | Go file to use as style reference |
 | `--conventions` | embedded | Custom conventions file |
 | `--force-solve` | `false` | Skip existing fix check in solve mode |

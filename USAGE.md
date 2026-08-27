@@ -132,6 +132,29 @@ JIRA → atlas gathers 40K context → local LLM distills to XML → file saved
 
 Zero Claude tokens until you paste. Estimated 50-70% token reduction vs raw JIRA.
 
+## Supplemental PR Review Mode
+
+The review mode is designed for packets produced by
+`~/.claude/skills/codeatlas/scripts/review_pr.py`. It runs a separate local
+review over the bounded diff and CodeAtlas evidence:
+
+```bash
+./assistant --review-file review-packet.md \
+  --graph ~/codeatlas/hypershift-graph.json \
+  --model qwen3.8:27b --num-ctx 24576 --max-output 1800
+```
+
+Output sections are:
+
+- supported changed-line findings
+- architecture and impact
+- verification additions
+- unknowns requiring human or live-cluster validation
+
+The packet is treated as untrusted data. This mode does not execute packet
+content, write source files, or post GitHub comments. Set `OLLAMA_HOST` when
+Ollama is not listening on the default local endpoint.
+
 ## Specify Model
 
 ```bash
@@ -198,6 +221,8 @@ Override with a custom conventions file for other projects:
 |------|---------|-------------|
 | `--graph` | `atlas.json` | Path to atlas graph JSON |
 | `--model` | auto-detect | Ollama model name |
+| `--num-ctx` | `24576` | Ollama context size |
+| `--max-output` | `1800` | Maximum generated tokens |
 | `--interactive` | false | Enter REPL mode |
 | `--solve` | — | JIRA description text to analyze |
 | `--solve-file` | — | Path to file containing JIRA description |
@@ -205,6 +230,7 @@ Override with a custom conventions file for other projects:
 | `--claude-file` | — | Path to file — generate Claude-optimized prompt |
 | `--output` | auto | Output file for Claude prompt (default: `<input>-claude.xml`) |
 | `--generate` | — | Description of Go code to generate |
+| `--review-file` | — | Path to a local PR review packet |
 | `--force-solve` | false | Skip existing fix check in solve mode |
 | `--style-file` | auto-detect | Go file to use as style reference |
 | `--conventions` | embedded | Conventions file for domain knowledge |

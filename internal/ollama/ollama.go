@@ -18,11 +18,15 @@ type LLM interface {
 }
 
 type Client struct {
-	Model string
+	Model     string
+	NumCtx    int
+	MaxOutput int
 }
 
 type Options struct {
-	Temperature float64 `json:"temperature"`
+	Temperature float64 `json:"temperature,omitempty"`
+	NumCtx      int     `json:"num_ctx,omitempty"`
+	NumPredict  int     `json:"num_predict,omitempty"`
 }
 
 type request struct {
@@ -43,8 +47,27 @@ type tagsResponse struct {
 	} `json:"models"`
 }
 
+func baseURL() string {
+	host := os.Getenv("OLLAMA_HOST")
+	if host == "" {
+		host = "http://localhost:11434"
+	}
+	if !strings.Contains(host, "://") {
+		host = "http://" + host
+	}
+	return strings.TrimRight(host, "/")
+}
+
+func (c *Client) options() Options {
+	return Options{
+		Temperature: 0.1,
+		NumCtx:      c.NumCtx,
+		NumPredict:  c.MaxOutput,
+	}
+}
+
 func ListModels() ([]string, error) {
-	resp, err := http.Get("http://localhost:11434/api/tags")
+	resp, err := http.Get(baseURL() + "/api/tags")
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to ollama (is it running?): %w", err)
 	}
@@ -69,9 +92,10 @@ func ListModels() ([]string, error) {
 
 func (c *Client) Generate(prompt string) error {
 	req := request{
-		Model:  c.Model,
-		Prompt: prompt,
-		Stream: true,
+		Model:   c.Model,
+		Prompt:  prompt,
+		Stream:  true,
+		Options: c.options(),
 	}
 
 	body, err := json.Marshal(req)
@@ -83,7 +107,7 @@ func (c *Client) Generate(prompt string) error {
 
 	client := &http.Client{Timeout: 30 * time.Minute}
 	resp, err := client.Post(
-		"http://localhost:11434/api/generate",
+		baseURL()+"/api/generate",
 		"application/json",
 		bytes.NewBuffer(body),
 	)
@@ -111,9 +135,10 @@ func (c *Client) Generate(prompt string) error {
 
 func (c *Client) GenerateString(prompt string) (string, error) {
 	req := request{
-		Model:  c.Model,
-		Prompt: prompt,
-		Stream: true,
+		Model:   c.Model,
+		Prompt:  prompt,
+		Stream:  true,
+		Options: c.options(),
 	}
 
 	body, err := json.Marshal(req)
@@ -125,7 +150,7 @@ func (c *Client) GenerateString(prompt string) (string, error) {
 
 	client := &http.Client{Timeout: 30 * time.Minute}
 	resp, err := client.Post(
-		"http://localhost:11434/api/generate",
+		baseURL()+"/api/generate",
 		"application/json",
 		bytes.NewBuffer(body),
 	)

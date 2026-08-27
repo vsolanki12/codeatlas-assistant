@@ -70,6 +70,11 @@ type GenerateData struct {
 	StyleCode   string
 }
 
+type ReviewData struct {
+	Packet      string
+	Conventions string
+}
+
 func BuildAsk(question, atlasOutput, intent string) string {
 	return execute("ask.tmpl", AskData{
 		Question:    question,
@@ -108,6 +113,27 @@ func BuildGenerate(description, atlasData, styleCode, conventions string) string
 		Conventions: conventions,
 		StyleCode:   styleCode,
 	})
+}
+
+func BuildReview(packet, conventions string) string {
+	return execute("review.tmpl", ReviewData{
+		Packet:      packet,
+		Conventions: conventions,
+	})
+}
+
+func LimitReviewPacket(packet string, maxChars int) string {
+	if maxChars <= 0 || len(packet) <= maxChars {
+		return packet
+	}
+	marker := "\n\n[Middle review packet truncated to protect the local model context window.]\n\n"
+	if len(marker) >= maxChars {
+		return packet[:maxChars]
+	}
+	contentLimit := maxChars - len(marker)
+	head := int(float64(contentLimit) * 0.62)
+	tail := contentLimit - head
+	return packet[:head] + marker + packet[len(packet)-tail:]
 }
 
 func BuildClaude(jiraText, atlasData, conventions, styleCode, repoFiles, apiTypes string, framework *FrameworkInfo, controllers []ControllerEntry) string {

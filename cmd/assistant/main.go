@@ -19,6 +19,8 @@ import (
 func main() {
 	model := flag.String("model", "", "ollama model name (auto-detect if empty)")
 	graphPath := flag.String("graph", "atlas.json", "path to atlas graph JSON")
+	numCtx := flag.Int("num-ctx", 24576, "ollama context size")
+	maxOutput := flag.Int("max-output", 1800, "maximum generated tokens")
 	interactive := flag.Bool("interactive", false, "interactive REPL mode")
 	solveFlag := flag.String("solve", "", "solve a JIRA issue (pass description text)")
 	solveFile := flag.String("solve-file", "", "solve a JIRA issue (read description from file)")
@@ -27,13 +29,22 @@ func main() {
 	outputFile := flag.String("output", "", "output file for Claude prompt (auto-named if empty)")
 	repoPath := flag.String("repo", "", "path to source repo (injects file tree into Claude prompt)")
 	generateFlag := flag.String("generate", "", "generate Go code (describe what to write)")
+	reviewFile := flag.String("review-file", "", "review a local PR packet from a file")
 	styleFile := flag.String("style-file", "", "Go file to use as style reference (auto-detect if empty)")
 	conventionsFile := flag.String("conventions", "", "conventions file (embedded default if empty)")
 	forceSolve := flag.Bool("force-solve", false, "skip existing fix check in solve mode")
 	distillOnly := flag.Bool("distill-only", false, "generate XML + manifest only, skip solve step")
 	flag.Parse()
+	if *numCtx < 8192 {
+		fmt.Fprintln(os.Stderr, "error: --num-ctx must be at least 8192")
+		os.Exit(1)
+	}
+	if *maxOutput < 256 {
+		fmt.Fprintln(os.Stderr, "error: --max-output must be at least 256")
+		os.Exit(1)
+	}
 
-	heavy := *claudeFile != "" || *solveFile != "" || *solveFlag != "" || *generateFlag != ""
+	heavy := *claudeFile != "" || *solveFile != "" || *solveFlag != "" || *generateFlag != "" || *reviewFile != ""
 	resolvedModel, err := resolveModel(*model, heavy)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -41,8 +52,28 @@ func main() {
 	}
 
 	a := &atlas.Client{Path: *graphPath}
-	llm := &ollama.Client{Model: resolvedModel}
+	llm := &ollama.Client{Model: resolvedModel, NumCtx: *numCtx, MaxOutput: *maxOutput}
 	conventions := prompt.LoadConventions(*conventionsFile)
+
+	if *reviewFile != "" {
+		data, err := os.ReadFile(*reviewFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error reading review packet: %v\n", err)
+			os.Exit(1)
+		}
+		packetLimit := reviewPacketLimit(*numCtx, *maxOutput)
+		reviewPacket := prompt.LimitReviewPacket(string(data), packetLimit)
+		reviewPrompt := prompt.BuildReview(reviewPacket, conventions)
+		if reviewPrompt == "" {
+			fmt.Fprintln(os.Stderr, "error: could not build review prompt")
+			os.Exit(1)
+		}
+		if err := llm.Generate(reviewPrompt); err != nil {
+			fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *claudeFile != "" {
 		data, err := os.ReadFile(*claudeFile)
@@ -109,13 +140,26 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude --repo ~/hypershift")
 		fmt.Fprintln(os.Stderr, "       assistant --claude-file jira.txt")
 		fmt.Fprintln(os.Stderr, "       assistant --generate \"add a validation function for NodePool\"")
+		fmt.Fprintln(os.Stderr, "       assistant --review-file review-packet.md --graph graph.json")
 		fmt.Fprintln(os.Stderr, "       assistant --interactive")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "flags: --model name, --graph path, --conventions file")
+		fmt.Fprintln(os.Stderr, "flags: --model name, --graph path, --num-ctx N, --max-output N, --conventions file, --review-file packet")
 		os.Exit(1)
 	}
 
 	handleQuestion(a, llm, question)
+}
+
+func reviewPacketLimit(numCtx, maxOutput int) int {
+	usableTokens := numCtx - maxOutput - 2000
+	if usableTokens < 2048 {
+		usableTokens = 2048
+	}
+	limit := int(float64(usableTokens) * 3 * 0.70)
+	if limit < 8000 {
+		return 8000
+	}
+	return limit
 }
 
 var heavyModels = []string{"qwen2.5-coder:32b", "qwen3:30b", "qwen3:14b", "qwen3:8b"}

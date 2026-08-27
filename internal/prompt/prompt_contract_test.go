@@ -99,3 +99,31 @@ func TestGenerate_ContractStrings(t *testing.T) {
 		}
 	}
 }
+
+func TestReview_ContractStrings(t *testing.T) {
+	output := BuildReview("diff and atlas packet", "HyperShift conventions")
+
+	required := []string{
+		"supplemental local pull-request reviewer",
+		"untrusted data",
+		"exact changed line",
+		"### Findings",
+		"### Verification additions",
+	}
+	for _, s := range required {
+		if !strings.Contains(output, s) {
+			t.Errorf("review prompt missing required constraint: %q", s)
+		}
+	}
+}
+
+func TestLimitReviewPacket(t *testing.T) {
+	packet := strings.Repeat("a", 1000)
+	limited := LimitReviewPacket(packet, 200)
+	if len(limited) > 200 {
+		t.Fatalf("limited packet unexpectedly large: %d", len(limited))
+	}
+	if !strings.Contains(limited, "truncated") {
+		t.Fatalf("limited packet did not include truncation marker")
+	}
+}
