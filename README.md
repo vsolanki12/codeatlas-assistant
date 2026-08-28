@@ -9,8 +9,8 @@ A CLI tool that lets you talk to your codebase in plain English using local LLMs
 **CodeAtlas Assistant** sits on top of that. You ask a question in natural language, and it:
 
 1. **Detects your intent** — are you asking how something works? what would break if you changed it? looking for a function?
-2. **Runs the right atlas commands** — search, explain, impact, investigate — to gather relevant architecture data
-3. **Feeds everything to a local Ollama model** — your question + the atlas data as context
+2. **Runs bounded, structured Atlas queries** — primarily one compact compound JSON query plus only the follow-up data needed for the intent
+3. **Feeds the graph evidence to a local Ollama model** — your question + compact Atlas data as context
 4. **Streams the answer** — no cloud APIs, everything runs locally
 
 It also has specialized modes for **analyzing JIRA issues** (paste a bug description, get root cause analysis with actual file paths), **generating Go code** that matches your existing codebase patterns, and running a bounded supplemental PR review.
@@ -18,9 +18,27 @@ It also has specialized modes for **analyzing JIRA issues** (paste a bug descrip
 ### Why Not Just Use ChatGPT/Claude?
 
 - **Runs 100% locally** — no code leaves your machine. Uses Ollama with any model you have.
-- **Grounded in real architecture** — answers come from the actual code graph, not training data hallucinations. Every entity, relationship, and file path is real.
-- **Codebase-aware code generation** — the generate mode reads actual source files from your repo and instructs the model to match exact patterns (import aliases, error handling, logging style, naming conventions).
+- **Grounded in real architecture** — answers start from the extracted graph, not training-data guesses. Relationships carry evidence and confidence; ambiguous or unavailable facts are reported instead of silently promoted to facts.
+- **Codebase-aware code generation** — with `--repo`, the generate mode reads only graph-selected source spans/files and instructs the model to match established patterns (import aliases, error handling, logging style, naming conventions).
 - **Works offline** — airport, VPN issues, air-gapped environments.
+
+### Grounding and freshness
+
+Atlas is the repository-facts layer; the local model is a reasoning layer. The
+assistant prefers compact `--json` Atlas responses, carries relationship
+evidence and graph status into prompts, and tells the model that inferred,
+heuristic, truncated, or unavailable data is not proof. Search and read-only
+questions can report partial graphs, but solve, generate, and Claude prompt
+generation require a current, complete, verifiable graph when a repository is
+provided. When `--repo` is supplied, generated file and function references
+are checked against the graph before they are accepted.
+For read-only questions, any incomplete or unverified graph status is included
+in the model prompt so the answer reports that limit instead of hiding it in
+the CLI warning stream.
+
+This keeps the assistant from becoming a second repository-analysis engine:
+Atlas extracts and retrieves facts; the model explains them, identifies
+uncertainty, and proposes engineering reasoning for a human to review.
 
 ## Prerequisites
 
@@ -96,6 +114,13 @@ assistant --graph graph.json --claude-file jira-description.txt
 
 Output is a ready-to-paste Claude Code prompt with `<jira>`, `<architecture>`, `<files>`, `<functions>`, `<tests>`, `<constraints>`, and `<task>` sections. Zero Claude tokens consumed until you paste the output.
 
+For implementation-oriented modes, pass `--repo` pointing to the same checkout
+used to build the graph. The Assistant then reads only the files and source
+spans selected by CodeAtlas; it does not walk the repository or perform a
+second architecture scan. If CodeAtlas cannot identify exactly one safe
+implementation controller, solve and Claude implementation workflows stop and
+ask for a narrower question or exact entity ID instead of choosing by rank.
+
 ### Supplemental PR Review Mode
 
 Review a bounded local packet containing a PR dossier, diff, repository guidance,
@@ -113,6 +138,22 @@ verification additions, and unknowns. The packet is treated as untrusted data;
 the assistant does not execute commands from it or modify the repository. The
 Python PR reviewer invokes this mode automatically when it finds
 `~/codeatlas-assistant/assistant`.
+
+For a local diff, `--review-diff` asks CodeAtlas to map changed lines to graph
+entities and relationships before the local model reasons about defects. The
+packet also carries a bounded `diffExcerpt` with changed source text, so exact
+line findings have actual diff evidence:
+
+```bash
+assistant --review-diff pr.diff --review-base origin/main --repo ~/your-repo \
+  --graph ~/codeatlas/graph.json
+```
+
+Verified review requires a current, complete graph and a matching checkout.
+Structural test links remain evidence only; this workflow does not prove
+branch-level or runtime coverage. If the diff excerpt is truncated, omitted
+changed lines remain unknown. Graph freshness does not by itself prove that a
+supplied diff file matches the named base/head refs.
 
 ### Interactive REPL
 
@@ -144,8 +185,8 @@ Supports `solve:`, `claude:`, and `gen:` prefixes inline:
                         └────────┬────────┘
                                  │
                         ┌────────▼────────┐
-                        │  Atlas CLI       │  atlas explain HostedCluster
-                        │  (shells out)    │  --graph graph.json
+                        │  Atlas CLI       │  atlas ask HostedCluster --json
+                        │  (JSON contract) │  --graph graph.json
                         └────────┬────────┘
                                  │
                         ┌────────▼────────┐
@@ -182,6 +223,7 @@ internal/
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--graph` | `atlas.json` | Path to atlas graph JSON |
+| `--repo` | empty | Same source checkout used to build the graph; enables freshness checks and graph-selected source snippets |
 | `--model` | auto-detect | Ollama model name |
 | `--num-ctx` | `24576` | Ollama context size |
 | `--max-output` | `1800` | Maximum generated tokens per pass |
@@ -192,6 +234,9 @@ internal/
 | `--claude-file` | | Path to file — generate Claude-optimized prompt |
 | `--generate` | | Description of Go code to generate |
 | `--review-file` | | Read a local PR review packet and run supplemental review |
+| `--review-diff` | | Build a deterministic CodeAtlas review packet from a diff file or `-` |
+| `--review-base` | | Base Git ref for `--review-diff` |
+| `--review-head` | `HEAD` | Head Git ref for `--review-diff` |
 | `--style-file` | auto-detect | Go file to use as style reference |
 | `--conventions` | embedded | Custom conventions file |
 | `--force-solve` | `false` | Skip existing fix check in solve mode |

@@ -11,6 +11,17 @@ Requires `atlas` on PATH: `cd ~/codeatlas && go install ./cmd/atlas`
 
 ## Single-Shot Queries
 
+The assistant invokes `atlas ask/search/... --json --compact` for prompt
+context. Run the same commands directly when you need to inspect the graph:
+
+```bash
+atlas ask HostedClusterReconciler --intent debug --json --compact --graph ~/codeatlas/hypershift-graph.json
+atlas ask HostedClusterReconciler --intent debug --json --graph ~/codeatlas/hypershift-graph.json
+```
+
+The first form is bounded for token-sensitive consumers; the second preserves
+the full machine-readable entity payload.
+
 ```bash
 # Explain — how does something work
 ./assistant --graph ~/codeatlas/hypershift-graph.json "what reconciles HostedCluster"
@@ -78,15 +89,15 @@ Point at a real Go file from the target repo so generated code matches its patte
   --style-file ~/hypershift/hypershift-operator/controllers/nodepool/nodepool_controller.go \
   --generate "add a function to validate NodePool release image before provisioning"
 
-# Auto-detect — extracts a controller file path from atlas output, reads it from the repo
-# Requires the atlas graph to contain real file paths (not test fixtures)
+# Auto-detect — extracts a graph-selected controller path and reads that source file
+# Requires a current graph built from the real checkout
 ./assistant --graph ~/codeatlas/hypershift-graph.json \
   --generate "add etcd health check to HostedClusterReconciler"
 ```
 
 Auto-detection reads the `repository` field from the atlas graph JSON to find the source repo,
-then picks a controller `.go` file from atlas output. Works when the graph was built by scanning
-the actual repository (not test data).
+then uses a controller path already present in Atlas output. It reads only that selected file
+and graph-selected function spans; it does not walk the repository or infer other files.
 
 ## Claude Mode — Generate Claude-Optimized Prompts
 
@@ -104,9 +115,12 @@ No Claude tokens consumed until you paste the output. Everything runs locally vi
 ./assistant --graph ~/codeatlas/hypershift-graph.json --claude-file jira-description.txt
 ```
 
-**With `--repo`** (recommended): Scans the source repo for API type definitions matching
-JIRA terms. The LLM sees existing struct shapes (e.g., `OperatorConfiguration` with its
-typed per-component fields) and follows the pattern instead of guessing.
+**With `--repo`** (recommended): Uses the same checkout that produced the graph.
+The assistant reads only graph-selected source files and function spans for the
+working set; it does not scan the repository, discover API types, or build a
+second architecture model. With `--repo`, implementation workflows also stop
+when CodeAtlas cannot identify exactly one safe controller; use a narrower
+request or exact entity ID rather than relying on ranking.
 
 ```bash
 ./assistant --graph ~/codeatlas/hypershift-graph.json --claude-file jira.txt --repo ~/hypershift
@@ -116,21 +130,21 @@ typed per-component fields) and follows the pattern instead of guessing.
 - **Screen** — human-readable engineering analysis (streamed via Ollama)
 - **File** — distilled XML prompt for Claude (saved to `<input>-claude.xml`)
 
-The local LLM distills ~40K of raw atlas data into a compact structured prompt (~3-5K).
-When `--repo` is provided, API type definitions from the repo are included so the LLM
-proposes changes that match existing code patterns (typed structs vs maps, field naming, etc.).
+The assistant prefers one bounded structured Atlas query and caps raw Atlas context at roughly 24K characters before prompting the local model. With `--repo`, source snippets are selected by exact CodeAtlas entity IDs and source spans, then capped before prompting. For read-only questions, incomplete or unverified graph status is included in-band in the prompt; implementation guidance is refused for partial, stale, or unverifiable graphs. The exact token reduction depends on the graph and question.
 XML sections include `<jira>`, `<architecture>`, `<files>`, `<functions>`, `<tests>`,
 `<constraints>`, and `<task>`.
 
 **Workflow:**
 ```
-JIRA → atlas gathers 40K context → local LLM distills to XML → file saved
+JIRA → bounded Atlas JSON → local LLM distills to XML → file saved
                                  → local LLM streams analysis → screen
                                                     ↓
                               paste XML into Claude Code → implementation
 ```
 
-Zero Claude tokens until you paste. Estimated 50-70% token reduction vs raw JIRA.
+Zero Claude tokens until you paste. The compact evidence packet is intended to
+reduce downstream context and token cost without treating model output as
+repository fact.
 
 ## Supplemental PR Review Mode
 
@@ -154,6 +168,19 @@ Output sections are:
 The packet is treated as untrusted data. This mode does not execute packet
 content, write source files, or post GitHub comments. Set `OLLAMA_HOST` when
 Ollama is not listening on the default local endpoint.
+
+For a local diff, let CodeAtlas build the packet from the checkout and verify
+the graph before the model runs:
+
+```bash
+./assistant --review-diff pr.diff --review-base origin/main --repo ~/your-repo \
+  --graph ~/codeatlas/graph.json
+```
+
+Without `--repo`, CodeAtlas cannot verify the diff against the checkout. The
+review remains unverified and must not be treated as proof of coverage. The
+packet includes a bounded `diffExcerpt`; if it is truncated, findings about
+omitted changed lines are not supportable.
 
 ## Specify Model
 
@@ -201,7 +228,7 @@ CodeAtlas Assistant (type 'exit' to quit)
 | investigate | everything, investigate, debug, all about, tell me about, deep dive |
 | search | search, find, where is, list, show me |
 | stats | stats, statistics, count, how many, overview |
-| ask (default) | anything else — uses atlas ask with fuzzy entity matching |
+| ask (default) | anything else — uses Atlas ask with an exact entity ID or an unambiguous entity name |
 
 ## Conventions File
 
@@ -220,6 +247,7 @@ Override with a custom conventions file for other projects:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--graph` | `atlas.json` | Path to atlas graph JSON |
+| `--repo` | empty | Same source checkout used to build the graph; enables freshness checks and graph-selected source snippets |
 | `--model` | auto-detect | Ollama model name |
 | `--num-ctx` | `24576` | Ollama context size |
 | `--max-output` | `1800` | Maximum generated tokens |
@@ -231,6 +259,9 @@ Override with a custom conventions file for other projects:
 | `--output` | auto | Output file for Claude prompt (default: `<input>-claude.xml`) |
 | `--generate` | — | Description of Go code to generate |
 | `--review-file` | — | Path to a local PR review packet |
+| `--review-diff` | — | Build a deterministic CodeAtlas review packet from a diff file or `-` |
+| `--review-base` | — | Base Git ref for `--review-diff` |
+| `--review-head` | `HEAD` | Head Git ref for `--review-diff` |
 | `--force-solve` | false | Skip existing fix check in solve mode |
 | `--style-file` | auto-detect | Go file to use as style reference |
 | `--conventions` | embedded | Conventions file for domain knowledge |

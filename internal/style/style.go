@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/vsolanki12/codeatlas-assistant/internal/atlas"
 )
 
 var filePathPattern = regexp.MustCompile(`[a-zA-Z0-9_/.-]+\.go:\d+`)
@@ -59,6 +61,20 @@ func DetectRepoRoot(graphPath string) string {
 }
 
 func extractGoFilePath(atlasData string) string {
+	// Structured Atlas responses are the preferred input. Read the exact source
+	// location from the entity rather than trying to reconstruct file:line text
+	// from JSON formatting.
+	for _, ref := range atlas.EntityRefs(atlasData) {
+		if isGoSourceFile(ref.Source.File) {
+			return ref.Source.File
+		}
+		for _, file := range ref.Files {
+			if isGoSourceFile(file) {
+				return file
+			}
+		}
+	}
+
 	matches := filePathPattern.FindAllString(atlasData, -1)
 	for _, m := range matches {
 		parts := strings.SplitN(m, ":", 2)
@@ -74,6 +90,10 @@ func extractGoFilePath(atlasData string) string {
 		return strings.SplitN(matches[0], ":", 2)[0]
 	}
 	return ""
+}
+
+func isGoSourceFile(path string) bool {
+	return strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go")
 }
 
 func readFile(path string) string {

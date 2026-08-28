@@ -18,6 +18,14 @@ scenario. Findings must point to an exact changed line present in the diff. Do n
 style, naming, formatting, or a subjective refactor. Do not report a pre-existing issue
 unless the change makes it reachable or changes its meaning.
 
+The packet's `diffExcerpt` is bounded unified-diff evidence and contains the
+changed source text when available. `changedFiles` contains paths, hunk ranges,
+and counts only. If `diffExcerptTruncated` is true, do not make exact-line claims
+about omitted portions; state that the evidence is incomplete.
+Graph freshness verifies the graph and checkout, not that a supplied diff file
+matches the named base/head refs. Treat that limitation as an unknown when it
+is present in the packet.
+
 Output exactly these sections:
 
 ## Supplemental review

@@ -14,6 +14,7 @@ import (
 	"github.com/vsolanki12/codeatlas-assistant/internal/ollama"
 	"github.com/vsolanki12/codeatlas-assistant/internal/prompt"
 	"github.com/vsolanki12/codeatlas-assistant/internal/solve"
+	"github.com/vsolanki12/codeatlas-assistant/internal/validate"
 )
 
 func main() {
@@ -27,9 +28,12 @@ func main() {
 	claudeFlag := flag.Bool("claude", false, "save Claude prompt to file + show analysis on screen")
 	claudeFile := flag.String("claude-file", "", "read JIRA from file, save Claude prompt + show analysis")
 	outputFile := flag.String("output", "", "output file for Claude prompt (auto-named if empty)")
-	repoPath := flag.String("repo", "", "path to source repo (injects file tree into Claude prompt)")
+	repoPath := flag.String("repo", "", "same source checkout as the graph (enables freshness checks and graph-selected source snippets)")
 	generateFlag := flag.String("generate", "", "generate Go code (describe what to write)")
 	reviewFile := flag.String("review-file", "", "review a local PR packet from a file")
+	reviewDiff := flag.String("review-diff", "", "build a deterministic CodeAtlas PR packet from a Git diff file or -")
+	reviewBase := flag.String("review-base", "", "base Git ref for --review-diff")
+	reviewHead := flag.String("review-head", "HEAD", "head Git ref for --review-diff")
 	styleFile := flag.String("style-file", "", "Go file to use as style reference (auto-detect if empty)")
 	conventionsFile := flag.String("conventions", "", "conventions file (embedded default if empty)")
 	forceSolve := flag.Bool("force-solve", false, "skip existing fix check in solve mode")
@@ -44,7 +48,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	heavy := *claudeFile != "" || *solveFile != "" || *solveFlag != "" || *generateFlag != "" || *reviewFile != ""
+	heavy := *claudeFile != "" || *solveFile != "" || *solveFlag != "" || *generateFlag != "" || *reviewFile != "" || *reviewDiff != ""
 	resolvedModel, err := resolveModel(*model, heavy)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -55,22 +59,55 @@ func main() {
 	llm := &ollama.Client{Model: resolvedModel, NumCtx: *numCtx, MaxOutput: *maxOutput}
 	conventions := prompt.LoadConventions(*conventionsFile)
 
-	if *reviewFile != "" {
-		data, err := os.ReadFile(*reviewFile)
+	if *reviewFile != "" || *reviewDiff != "" {
+		if *reviewFile != "" && *reviewDiff != "" {
+			fmt.Fprintln(os.Stderr, "error: use only one of --review-file or --review-diff")
+			os.Exit(1)
+		}
+		freshness := atlas.CheckFreshness(a, *repoPath)
+		if !freshness.Available || freshness.Stale || freshness.RepositoryMismatch || freshness.Dirty || freshness.Incomplete || freshness.GraphCommit == "" || freshness.EntityIdentity == "" || !freshness.Verifiable || !freshness.StateVerifiable {
+			fmt.Fprintf(os.Stderr, "atlas error: %s\n", freshness.Warning())
+			return
+		}
+		reviewRepo := *repoPath
+		if reviewRepo == "" {
+			reviewRepo = freshness.GraphRepository
+		}
+
+		var reviewPacket string
+		var err error
+		if *reviewDiff != "" {
+			reviewPacket, err = deterministicReviewPacket(a, *reviewDiff, *reviewBase, *reviewHead, reviewRepo)
+		} else {
+			var data []byte
+			data, err = os.ReadFile(*reviewFile)
+			if err == nil {
+				reviewPacket = string(data)
+			}
+		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error reading review packet: %v\n", err)
+			fmt.Fprintf(os.Stderr, "error loading review packet: %v\n", err)
+			os.Exit(1)
+		}
+		if reviewPacket == "" {
+			fmt.Fprintln(os.Stderr, "error: review packet is empty")
 			os.Exit(1)
 		}
 		packetLimit := reviewPacketLimit(*numCtx, *maxOutput)
-		reviewPacket := prompt.LimitReviewPacket(string(data), packetLimit)
+		reviewPacket = prompt.LimitReviewPacket(reviewPacket, packetLimit)
 		reviewPrompt := prompt.BuildReview(reviewPacket, conventions)
 		if reviewPrompt == "" {
 			fmt.Fprintln(os.Stderr, "error: could not build review prompt")
 			os.Exit(1)
 		}
-		if err := llm.Generate(reviewPrompt); err != nil {
+		output, err := llm.GenerateString(reviewPrompt)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
 			os.Exit(1)
+		}
+		fmt.Print(output)
+		if result := validate.Output(output, *repoPath, a); !result.OK() {
+			fmt.Fprintf(os.Stderr, "\n--- VALIDATION WARNING ---\n%s", result.Report())
 		}
 		return
 	}
@@ -121,12 +158,12 @@ func main() {
 	}
 
 	if *generateFlag != "" {
-		generate.Run(a, llm, *generateFlag, *styleFile, conventions)
+		generate.Run(a, llm, *generateFlag, *styleFile, conventions, *repoPath)
 		return
 	}
 
 	if *interactive {
-		runREPL(a, llm, conventions)
+		runREPL(a, llm, conventions, *repoPath)
 		return
 	}
 
@@ -141,13 +178,28 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       assistant --claude-file jira.txt")
 		fmt.Fprintln(os.Stderr, "       assistant --generate \"add a validation function for NodePool\"")
 		fmt.Fprintln(os.Stderr, "       assistant --review-file review-packet.md --graph graph.json")
+		fmt.Fprintln(os.Stderr, "       assistant --review-diff diff.patch --review-base origin/main --repo ~/repo")
 		fmt.Fprintln(os.Stderr, "       assistant --interactive")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "flags: --model name, --graph path, --num-ctx N, --max-output N, --conventions file, --review-file packet")
 		os.Exit(1)
 	}
 
-	handleQuestion(a, llm, question)
+	handleQuestion(a, llm, question, *repoPath)
+}
+
+func deterministicReviewPacket(a atlas.Runner, diffPath, base, head, repo string) (string, error) {
+	args := []string{"review", "--diff", diffPath, "--head", head}
+	if base != "" {
+		args = append(args, "--base", base)
+	}
+	if repo != "" {
+		args = append(args, "--repo", repo)
+	}
+	if runner, ok := a.(atlas.JSONRunner); ok {
+		return runner.RunJSON(args...)
+	}
+	return a.Run(append(args, "--json")...)
 }
 
 func reviewPacketLimit(numCtx, maxOutput int) int {
@@ -202,7 +254,16 @@ func resolveModel(model string, heavy bool) (string, error) {
 	return models[0], nil
 }
 
-func handleQuestion(a atlas.Runner, llm ollama.LLM, question string) {
+func handleQuestion(a atlas.Runner, llm ollama.LLM, question, repoPath string) {
+	freshness := atlas.CheckFreshness(a, repoPath)
+	if !freshness.Available || freshness.Stale || freshness.RepositoryMismatch {
+		fmt.Fprintf(os.Stderr, "atlas error: %s\n", freshness.Warning())
+		return
+	}
+	if warning := freshness.Warning(); warning != "" {
+		fmt.Fprintf(os.Stderr, "atlas warning: %s\n", warning)
+	}
+
 	i := intent.Detect(question)
 	entity := intent.ExtractEntity(question)
 
@@ -213,16 +274,48 @@ func handleQuestion(a atlas.Runner, llm ollama.LLM, question string) {
 		fmt.Fprintf(os.Stderr, "atlas error: %v\n", err)
 		os.Exit(1)
 	}
+	if atlas.IsAmbiguous(atlasOutput) {
+		fmt.Fprintln(os.Stderr, "atlas error: entity name is ambiguous; rerun with the exact CodeAtlas entity ID")
+		for _, ref := range atlas.EntityRefs(atlasOutput) {
+			fmt.Fprintf(os.Stderr, "  candidate: %s\n", ref.ID)
+		}
+		return
+	}
+	if freshness.Warning() != "" {
+		atlasOutput = freshness.PromptContext() + "\n\n## CodeAtlas Query Evidence\n" + atlasOutput
+	}
 
 	p := prompt.BuildAsk(question, atlasOutput, i.String())
 
-	if err := llm.Generate(p); err != nil {
+	output, err := llm.GenerateString(p)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
 		os.Exit(1)
+	}
+	fmt.Print(output)
+	if result := validate.Output(output, repoPath, a); !result.OK() {
+		fmt.Fprintf(os.Stderr, "\n--- VALIDATION WARNING ---\n%s", result.Report())
 	}
 }
 
 func runForIntent(a atlas.Runner, entity string, i intent.Intent) (string, error) {
+	if jsonRunner, ok := a.(atlas.JSONRunner); ok {
+		switch i {
+		case intent.Explain:
+			return jsonRunner.RunJSON("ask", entity, "--intent", "understand", "--compact")
+		case intent.Impact:
+			return jsonRunner.RunJSON("ask", entity, "--intent", "impact", "--compact")
+		case intent.Investigate:
+			return jsonRunner.RunJSON("ask", entity, "--intent", "debug", "--compact")
+		case intent.Search:
+			return jsonRunner.RunJSON("search", entity, "--compact")
+		case intent.Stats:
+			return jsonRunner.RunJSON("stats")
+		default:
+			return jsonRunner.RunJSON("ask", entity, "--compact")
+		}
+	}
+
 	switch i {
 	case intent.Explain:
 		return multiSource(a, entity, "explain", "investigate")
@@ -259,7 +352,7 @@ func multiSource(a atlas.Runner, entity string, commands ...string) (string, err
 	return combined.String(), nil
 }
 
-func runREPL(a atlas.Runner, llm ollama.LLM, conventions string) {
+func runREPL(a atlas.Runner, llm ollama.LLM, conventions, repoPath string) {
 	fmt.Println("CodeAtlas Assistant (type 'exit' to quit)")
 	fmt.Println("  prefix with 'solve:' to analyze a JIRA description")
 	fmt.Println("  prefix with 'claude:' to generate Claude prompt")
@@ -286,20 +379,20 @@ func runREPL(a atlas.Runner, llm ollama.LLM, conventions string) {
 		if strings.HasPrefix(input, "solve:") {
 			jiraText := strings.TrimSpace(strings.TrimPrefix(input, "solve:"))
 			if jiraText != "" {
-				solve.Run(a, llm, jiraText, conventions, false, "")
+				solve.Run(a, llm, jiraText, conventions, false, repoPath)
 			}
 		} else if strings.HasPrefix(input, "claude:") {
 			jiraText := strings.TrimSpace(strings.TrimPrefix(input, "claude:"))
 			if jiraText != "" {
-				claude.Run(a, llm, jiraText, conventions, "claude-prompt.xml", "", false)
+				claude.Run(a, llm, jiraText, conventions, "claude-prompt.xml", repoPath, false)
 			}
 		} else if strings.HasPrefix(input, "gen:") {
 			desc := strings.TrimSpace(strings.TrimPrefix(input, "gen:"))
 			if desc != "" {
-				generate.Run(a, llm, desc, "", conventions)
+				generate.Run(a, llm, desc, "", conventions, repoPath)
 			}
 		} else {
-			handleQuestion(a, llm, input)
+			handleQuestion(a, llm, input, repoPath)
 		}
 		fmt.Println()
 	}

@@ -11,12 +11,36 @@ type Runner interface {
 	GraphPath() string
 }
 
+// JSONRunner is implemented by Atlas clients that can return the typed query
+// result directly. Keeping it optional preserves the small Runner interface
+// used by existing mocks and integrations.
+type JSONRunner interface {
+	Runner
+	RunJSON(args ...string) (string, error)
+}
+
 type Client struct {
 	Path string
 }
 
 func (c *Client) Run(args ...string) (string, error) {
-	fullArgs := append(args[:1], append([]string{"--graph", c.Path}, args[1:]...)...)
+	return c.run(args, false)
+}
+
+func (c *Client) RunJSON(args ...string) (string, error) {
+	return c.run(args, true)
+}
+
+func (c *Client) run(args []string, jsonOutput bool) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("atlas command is required")
+	}
+	fullArgs := make([]string, 0, len(args)+3)
+	fullArgs = append(fullArgs, args[0], "--graph", c.Path)
+	fullArgs = append(fullArgs, args[1:]...)
+	if jsonOutput {
+		fullArgs = append(fullArgs, "--json")
+	}
 
 	cmd := exec.Command("atlas", fullArgs...)
 
@@ -26,7 +50,10 @@ func (c *Client) Run(args ...string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		return "", fmt.Errorf("%s", stderr.String())
+		if stderr.Len() > 0 {
+			return "", fmt.Errorf("%s", stderr.String())
+		}
+		return "", fmt.Errorf("atlas %s: %w", args[0], err)
 	}
 
 	return stdout.String(), nil

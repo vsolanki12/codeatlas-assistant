@@ -1,9 +1,10 @@
 package workingset
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
-
-	"github.com/vsolanki12/codeatlas-assistant/internal/prompt"
 )
 
 func TestExtractFuncBlock(t *testing.T) {
@@ -154,133 +155,102 @@ function:hostedcluster.Reconcile`,
 	}
 }
 
-func TestCommonPathPrefix(t *testing.T) {
-	tests := []struct {
-		name string
-		a, b string
-		want string
-	}{
-		{"shared prefix", "a/b/c", "a/b/d", "a/b"},
-		{"no common prefix", "x/y", "a/b", ""},
-		{"one is prefix of other", "a/b/c", "a/b/c/d", "a/b/c"},
-		{"empty string", "", "a", ""},
-		{"identical paths", "a/b/c", "a/b/c", "a/b/c"},
-		{"single segment match", "a/x", "a/y", "a"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := commonPathPrefix(tt.a, tt.b)
-			if got != tt.want {
-				t.Errorf("commonPathPrefix(%q, %q) = %q, want %q", tt.a, tt.b, got, tt.want)
-			}
-		})
+func TestExtractFunctionIDsUsesStructuredEntityIdentity(t *testing.T) {
+	data := `{"entities":[{"id":"function:github.com/example/repo/pkg.Reconcile","name":"Reconcile","kind":"function"},{"id":"function:github.com/example/repo/pkg.Helper","name":"Helper","kind":"function"}]}`
+	got := extractFunctionIDs(data)
+	if len(got) != 2 || got[0] != "function:github.com/example/repo/pkg.Helper" || got[1] != "function:github.com/example/repo/pkg.Reconcile" {
+		t.Fatalf("extractFunctionIDs() = %v, want exact graph IDs", got)
 	}
 }
 
-func TestExtractJIRAComponents(t *testing.T) {
-	framework := &prompt.FrameworkInfo{
-		Components: "kube_apiserver/ | Deployment | deployment.go\netcd/ | StatefulSet | statefulset.go",
+func TestLimitWorkingSetPreservesBudget(t *testing.T) {
+	ws := &WorkingSet{
+		Types:     "types\n" + strings.Repeat("t", 200),
+		ImplFiles: []FileContent{{Path: "controller.go", Code: strings.Repeat("i", 200)}},
+		TestFiles: []FileContent{{Path: "controller_test.go", Code: strings.Repeat("x", 200)}},
 	}
-
-	tests := []struct {
-		name     string
-		jiraText string
-		want     map[string]bool
-	}{
-		{
-			name:     "matches hyphen variant",
-			jiraText: "fix kube-apiserver deployment",
-			want:     map[string]bool{"kube_apiserver": true},
-		},
-		{
-			name:     "matches underscore variant",
-			jiraText: "fix kube_apiserver deployment",
-			want:     map[string]bool{"kube_apiserver": true},
-		},
-		{
-			name:     "matches space variant",
-			jiraText: "fix kube apiserver deployment",
-			want:     map[string]bool{"kube_apiserver": true},
-		},
-		{
-			name:     "no matches",
-			jiraText: "nothing relevant here",
-			want:     map[string]bool{},
-		},
-		{
-			name:     "matches etcd",
-			jiraText: "etcd backup failing on upgrade",
-			want:     map[string]bool{"etcd": true},
-		},
-		{
-			name:     "matches multiple components",
-			jiraText: "kube-apiserver and etcd both failing",
-			want:     map[string]bool{"kube_apiserver": true, "etcd": true},
-		},
-		{
-			name:     "case insensitive",
-			jiraText: "ETCD backup failing",
-			want:     map[string]bool{"etcd": true},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractJIRAComponents(tt.jiraText, framework)
-			if len(got) != len(tt.want) {
-				t.Fatalf("extractJIRAComponents() = %v, want %v", got, tt.want)
-			}
-			for k := range tt.want {
-				if !got[k] {
-					t.Errorf("extractJIRAComponents() missing key %q", k)
-				}
-			}
-		})
+	limitWorkingSet(ws, 100)
+	if ws.TotalChars() > 100 {
+		t.Fatalf("working set has %d chars, want <= 100", ws.TotalChars())
 	}
 }
 
-func TestExtractReferencedComponents(t *testing.T) {
-	tests := []struct {
-		name          string
-		atlasData     string
-		frameworkPath string
-		wantContains  []string
-	}{
-		{
-			name:          "file path extraction",
-			atlasData:     "control-plane-operator/hostedclusterconfigoperator/controllers/resources/kube_apiserver/deployment.go:42",
-			frameworkPath: "control-plane-operator/hostedclusterconfigoperator/controllers/resources",
-			wantContains:  []string{"kube_apiserver"},
-		},
-		{
-			name:          "package pattern extraction",
-			atlasData:     "function:hostedcluster.Reconcile",
-			frameworkPath: "some/path",
-			wantContains:  []string{"hostedcluster"},
-		},
-		{
-			name:          "empty atlas data",
-			atlasData:     "",
-			frameworkPath: "some/path",
-			wantContains:  nil,
-		},
-		{
-			name:          "both patterns match",
-			atlasData:     "function:etcd.Reconcile\ncontrol-plane-operator/hostedclusterconfigoperator/controllers/resources/kube_apiserver/deployment.go:42",
-			frameworkPath: "control-plane-operator/hostedclusterconfigoperator/controllers/resources",
-			wantContains:  []string{"kube_apiserver", "etcd"},
-		},
+func TestBuildReadsGraphSelectedFunctionsAcrossFiles(t *testing.T) {
+	repo := t.TempDir()
+	for name, code := range map[string]string{
+		"controllers/setup.go":     "package controllers\n\nfunc Setup() {}\n",
+		"controllers/reconcile.go": "package controllers\n\nfunc Reconcile() {\n\tcallHelper()\n}\n",
+		"controllers/helper.go":    "package controllers\n\nfunc Helper() {\n\treturn\n}\n",
+	} {
+		path := filepath.Join(repo, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(code), 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractReferencedComponents(tt.atlasData, tt.frameworkPath)
-			for _, k := range tt.wantContains {
-				if !got[k] {
-					t.Errorf("extractReferencedComponents() missing key %q, got %v", k, got)
-				}
-			}
-		})
+	atlasData := `{"entities":[
+{"id":"controller:example.com/repo/controllers.Reconciler","name":"Reconciler","kind":"controller","source":{"file":"controllers/setup.go","line":3}},
+{"id":"function:example.com/repo/controllers.Reconcile","name":"Reconcile","kind":"function","source":{"file":"controllers/reconcile.go","line":3,"endLine":5}},
+{"id":"function:example.com/repo/controllers.Helper","name":"Helper","kind":"function","source":{"file":"controllers/helper.go","line":3,"endLine":5}}
+]}`
+
+	ws := Build(repo, atlasData, "", "controllers/setup.go")
+	if len(ws.ImplFiles) < 3 {
+		t.Fatalf("expected controller context plus exact functions from multiple files, got %+v", ws.ImplFiles)
+	}
+	joined := ""
+	for _, file := range ws.ImplFiles {
+		joined += file.Path + "\n" + file.Code + "\n"
+	}
+	for _, want := range []string{"controllers/setup.go", "controllers/reconcile.go → Reconcile()", "controllers/helper.go → Helper()", "callHelper()"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("working set missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestBuildForControllerKeepsOnlyEvidencedCallTargets(t *testing.T) {
+	repo := t.TempDir()
+	for name, code := range map[string]string{
+		"controllers/setup.go":     "package controllers\n\nfunc Setup() {}\n",
+		"controllers/reconcile.go": "package controllers\n\nfunc Reconcile() {\n\tcallHelper()\n}\n",
+		"controllers/unrelated.go": "package controllers\n\nfunc Unrelated() {\n\tpanic(\"should not be selected\")\n}\n",
+	} {
+		path := filepath.Join(repo, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(code), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	atlasData := `{"entity":{"id":"controller:example.com/repo/controllers.Reconciler","name":"Reconciler","kind":"controller","source":{"file":"controllers/setup.go","line":3}},
+"outgoing":{"calls":[{"relationship":{"id":"controller:example.com/repo/controllers.Reconciler--calls--function:example.com/repo/controllers.Reconcile","from":"controller:example.com/repo/controllers.Reconciler","to":"function:example.com/repo/controllers.Reconcile","type":"calls","confidence":"inferred","evidence":{"file":"controllers/setup.go","line":3,"reason":"call"}},"target":{"id":"function:example.com/repo/controllers.Reconcile","name":"Reconcile","kind":"function","source":{"file":"controllers/reconcile.go","line":3,"endLine":5}}}]},
+"siblings":[{"id":"function:example.com/repo/controllers.Unrelated","name":"Unrelated","kind":"function","source":{"file":"controllers/unrelated.go","line":3,"endLine":5}}]}`
+
+	ws := BuildForController(
+		repo,
+		atlasData,
+		"",
+		"controller:example.com/repo/controllers.Reconciler",
+		"controllers/setup.go",
+	)
+
+	if len(ws.Functions) != 1 || ws.Functions[0] != "function:example.com/repo/controllers.Reconcile" {
+		t.Fatalf("working set selected unrelated functions: %v", ws.Functions)
+	}
+	joined := ""
+	for _, file := range ws.ImplFiles {
+		joined += file.Path + "\n" + file.Code + "\n"
+	}
+	if !strings.Contains(joined, "controllers/reconcile.go → Reconcile()") {
+		t.Fatalf("working set omitted evidenced call target:\n%s", joined)
+	}
+	if strings.Contains(joined, "should not be selected") || strings.Contains(joined, "Unrelated()") {
+		t.Fatalf("working set included sibling function:\n%s", joined)
 	}
 }

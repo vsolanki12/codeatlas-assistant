@@ -12,12 +12,20 @@ import (
 	"github.com/vsolanki12/codeatlas-assistant/internal/ollama"
 	"github.com/vsolanki12/codeatlas-assistant/internal/prompt"
 	"github.com/vsolanki12/codeatlas-assistant/internal/style"
+	"github.com/vsolanki12/codeatlas-assistant/internal/validate"
 	"github.com/vsolanki12/codeatlas-assistant/internal/workingset"
 )
 
 var jiraIDPattern = regexp.MustCompile(`[A-Z]+-\d+`)
 
 func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions string, forceSolve bool, repoPath string) {
+	if freshness := atlas.CheckFreshness(a, repoPath); freshness.BlocksImplementation() {
+		fmt.Fprintf(os.Stderr, "atlas error: %s\n", freshness.Warning())
+		return
+	} else if warning := freshness.Warning(); warning != "" {
+		fmt.Fprintf(os.Stderr, "atlas warning: %s\n", warning)
+	}
+
 	if !forceSolve {
 		repoRoot := style.DetectRepoRoot(a.GraphPath())
 		if repoRoot != "" && checkExistingFix(jiraText, repoRoot) {
@@ -29,33 +37,29 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions string, forceSolv
 
 	atlasData := result.AtlasData
 	if atlasData == "" {
-		atlasData = "(no atlas data available)"
+		fmt.Fprintln(os.Stderr, "atlas error: no CodeAtlas evidence matched this JIRA; refusing to generate implementation guidance")
+		return
 	}
 
 	fmt.Fprintln(os.Stderr, "--- Generating solution ---")
 
 	var p string
 	if repoPath != "" {
-		entries := toEntries(result.Controllers)
-		framework := workingset.DetectFramework(repoPath)
-		if framework != nil {
-			fmt.Fprintf(os.Stderr, "--- Framework detected: %s (%d components) ---\n", framework.RelPath, framework.Count)
-			workingset.PromoteFrameworkController(entries, framework.RelPath)
+		selected, unique := gather.SelectImplementationController(result.Controllers)
+		if !unique {
+			fmt.Fprintln(os.Stderr, "atlas error: CodeAtlas did not identify exactly one implementation controller; provide a more specific request or exact CodeAtlas entity ID")
+			return
 		}
+		workload := selected.ID
+		workloadFile := selected.File
 
-		workload := ""
-		workloadFile := ""
-		for _, e := range entries {
-			if e.Role == "workload" {
-				workload = e.ID
-				workloadFile = e.File
-				break
-			}
-		}
-
-		ws := workingset.Build(repoPath, atlasData, "", workloadFile, jiraText, framework)
+		ws := workingset.BuildForController(repoPath, atlasData, "", workload, workloadFile, a)
 		fmt.Fprintf(os.Stderr, "--- Working set: %d files, %d chars ---\n",
 			len(ws.ImplFiles)+len(ws.TestFiles), ws.TotalChars())
+		if len(ws.ImplFiles) == 0 {
+			fmt.Fprintln(os.Stderr, "atlas error: no graph-selected implementation source was available; refusing to generate a solution")
+			return
+		}
 
 		implFiles := toPromptFiles(ws.ImplFiles)
 		testFiles := toPromptFiles(ws.TestFiles)
@@ -64,17 +68,20 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions string, forceSolv
 		p = prompt.BuildSolve(jiraText, atlasData, conventions, result.StyleCode, "", "")
 	}
 
-	if err := llm.Generate(p); err != nil {
+	output, err := llm.GenerateString(p)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "ollama error: %v\n", err)
+		return
 	}
-}
-
-func toEntries(controllers []gather.ControllerInfo) []prompt.ControllerEntry {
-	entries := make([]prompt.ControllerEntry, len(controllers))
-	for i, c := range controllers {
-		entries[i] = prompt.ControllerEntry{ID: c.ID, File: c.File, Role: c.Role}
+	validation := validate.Output(output, repoPath, a)
+	if !validation.OK() {
+		fmt.Fprintf(os.Stderr, "--- VALIDATION ERROR ---\n%s", validation.Report())
+		return
 	}
-	return entries
+	fmt.Print(output)
+	if validation.Checked > 0 {
+		fmt.Fprintf(os.Stderr, "\n--- %s ---\n", validation.Report())
+	}
 }
 
 func toPromptFiles(files []workingset.FileContent) []prompt.FileContent {

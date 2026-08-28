@@ -52,15 +52,17 @@ type FrameworkInfo struct {
 }
 
 type ClaudeData struct {
-	JiraText           string
-	AtlasData          string
-	Conventions        string
-	StyleCode          string
-	Controllers        []ControllerEntry
-	WorkloadController string
-	RepoFiles          string
-	Framework          *FrameworkInfo
-	APITypes           string
+	JiraText                 string
+	AtlasData                string
+	Conventions              string
+	StyleCode                string
+	Controllers              []ControllerEntry
+	ImplementationController string
+	ImplementationRole       string
+	AmbiguousController      bool
+	RepoFiles                string
+	Framework                *FrameworkInfo
+	APITypes                 string
 }
 
 type GenerateData struct {
@@ -68,6 +70,7 @@ type GenerateData struct {
 	AtlasData   string
 	Conventions string
 	StyleCode   string
+	SourceFiles []FileContent
 }
 
 type ReviewData struct {
@@ -115,6 +118,19 @@ func BuildGenerate(description, atlasData, styleCode, conventions string) string
 	})
 }
 
+// BuildGenerateWithSources adds only the source snippets selected by exact
+// CodeAtlas entity locations. It keeps generation on the same graph-first
+// path as solve and Claude implementation prompts.
+func BuildGenerateWithSources(description, atlasData, styleCode, conventions string, files []FileContent) string {
+	return execute("generate.tmpl", GenerateData{
+		Description: description,
+		AtlasData:   atlasData,
+		Conventions: conventions,
+		StyleCode:   styleCode,
+		SourceFiles: files,
+	})
+}
+
 func BuildReview(packet, conventions string) string {
 	return execute("review.tmpl", ReviewData{
 		Packet:      packet,
@@ -137,23 +153,38 @@ func LimitReviewPacket(packet string, maxChars int) string {
 }
 
 func BuildClaude(jiraText, atlasData, conventions, styleCode, repoFiles, apiTypes string, framework *FrameworkInfo, controllers []ControllerEntry) string {
-	workload := ""
+	implementationController := ""
+	controllerCount := len(controllers)
+	workloadCount := 0
+	implementationRole := ""
 	for _, c := range controllers {
 		if c.Role == "workload" {
-			workload = c.ID
-			break
+			implementationController = c.ID
+			implementationRole = c.Role
+			workloadCount++
 		}
 	}
+	if workloadCount == 0 && controllerCount == 1 {
+		implementationController = controllers[0].ID
+		implementationRole = controllers[0].Role
+	}
+	ambiguous := workloadCount > 1 || (workloadCount == 0 && controllerCount > 1)
+	if ambiguous {
+		implementationController = ""
+		implementationRole = ""
+	}
 	return execute("claude.tmpl", ClaudeData{
-		JiraText:           jiraText,
-		AtlasData:          atlasData,
-		Conventions:        conventions,
-		StyleCode:          styleCode,
-		Controllers:        controllers,
-		WorkloadController: workload,
-		RepoFiles:          repoFiles,
-		Framework:          framework,
-		APITypes:           apiTypes,
+		JiraText:                 jiraText,
+		AtlasData:                atlasData,
+		Conventions:              conventions,
+		StyleCode:                styleCode,
+		Controllers:              controllers,
+		ImplementationController: implementationController,
+		ImplementationRole:       implementationRole,
+		AmbiguousController:      ambiguous,
+		RepoFiles:                repoFiles,
+		Framework:                framework,
+		APITypes:                 apiTypes,
 	})
 }
 

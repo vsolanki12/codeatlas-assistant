@@ -1,3 +1,9 @@
+Grounding contract:
+- CodeAtlas is the source of repository facts. Treat its entities, relationships, paths, and tests as evidence, not suggestions.
+- A relationship marked inferred, heuristic, approximate, or truncated is not proven. Preserve that label in the answer.
+- Do not invent files, functions, packages, tests, relationships, or repository patterns. If the evidence is insufficient, respond ONLY with NEED_MORE_CONTEXT and name the missing CodeAtlas evidence.
+- Copy every file path and function ID exactly from the supplied context. A proposed new test may be described, but its path is not established unless CodeAtlas lists it.
+
 {{- if .ImplFiles}}
 The implementation point has been identified by CodeAtlas graph analysis.
 
@@ -15,7 +21,7 @@ respond ONLY with NEED_MORE_CONTEXT and explain what is missing.
 Controller: {{.Controller}}
 {{- end}}
 {{- if .Functions}}
-Functions to modify: {{.Functions}}
+Exact CodeAtlas function IDs to modify: {{.Functions}}
 {{- end}}
 
 {{- range .ImplFiles}}

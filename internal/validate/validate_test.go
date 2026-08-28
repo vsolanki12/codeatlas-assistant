@@ -1,8 +1,35 @@
 package validate
 
 import (
+	"strings"
 	"testing"
 )
+
+type validationRunner struct{}
+
+func (validationRunner) Run(args ...string) (string, error) { return "", nil }
+func (validationRunner) GraphPath() string                  { return "atlas.json" }
+func (validationRunner) RunJSON(args ...string) (string, error) {
+	if len(args) >= 2 && args[0] == "where" && args[1] == "pkg/known.go" {
+		return `{"entities":[{"id":"function:example/pkg.Known","name":"Known","kind":"function","source":{"file":"pkg/known.go"}}]}`, nil
+	}
+	if len(args) >= 2 && args[0] == "where" && args[1] == "config/widget.yaml" {
+		return `{"entities":[{"id":"resource:widget._cluster/example@config/widget.yaml","name":"Widget","kind":"resource","source":{"file":"config/widget.yaml"}}]}`, nil
+	}
+	if len(args) >= 2 && args[0] == "where" && args[1] == "docs/design.md" {
+		return `{"entities":[{"id":"document:docs/design.md","name":"design.md","kind":"document","source":{"file":"docs/design.md"}}]}`, nil
+	}
+	if len(args) >= 2 && args[0] == "ask" && args[1] == "function:example/pkg.Known" {
+		return `{"entity":{"id":"function:example/pkg.Known","name":"Known","kind":"function"}}`, nil
+	}
+	if len(args) >= 2 && args[0] == "ask" && args[1] == "Known" {
+		return `{"entity":{"id":"function:example/pkg.Known","name":"Known","kind":"function"}}`, nil
+	}
+	if len(args) >= 2 && args[0] == "search" && args[1] == "Known" {
+		return `{"entities":[{"id":"function:example/pkg.Known","name":"Known","kind":"function"}]}`, nil
+	}
+	return `{"entities":[]}`, nil
+}
 
 func TestExtractGoPaths(t *testing.T) {
 	text := `Modify these files:
@@ -13,9 +40,10 @@ Also check vendor/something.go and standalone.go for reference.`
 	paths := extractGoPaths(text)
 
 	want := map[string]bool{
-		"pkg/controllers/hostedcluster/hostedcluster_controller.go":                                         true,
+		"pkg/controllers/hostedcluster/hostedcluster_controller.go":                              true,
 		"control-plane-operator/controllers/hostedcontrolplane/hostedcontrolplane_controller.go": true,
 		"vendor/something.go": true,
+		"standalone.go":       true,
 	}
 
 	for _, p := range paths {
@@ -29,11 +57,11 @@ Also check vendor/something.go and standalone.go for reference.`
 	}
 }
 
-func TestExtractGoPaths_SkipsBareFilenames(t *testing.T) {
+func TestExtractGoPaths_IncludesBareFilenames(t *testing.T) {
 	text := "The file controller.go has the logic."
 	paths := extractGoPaths(text)
-	if len(paths) != 0 {
-		t.Errorf("expected 0 paths for bare filename, got %v", paths)
+	if len(paths) != 1 || paths[0] != "controller.go" {
+		t.Errorf("expected bare filename to be checked, got %v", paths)
 	}
 }
 
@@ -73,7 +101,7 @@ func TestExtractPathFromLine(t *testing.T) {
 	}{
 		{"- pkg/controller.go — main file", "pkg/controller.go"},
 		{"- pkg/helper.go - utilities", "pkg/helper.go"},
-		{"- README.md — docs", ""},
+		{"- README.md — docs", "README.md"},
 		{"- some text without path", ""},
 	}
 
@@ -117,8 +145,88 @@ func TestOutputNoRepo(t *testing.T) {
 
 func TestClaudeXMLEmpty(t *testing.T) {
 	r := ClaudeXML("no xml here", "", nil)
-	if r.Checked != 0 {
-		t.Errorf("expected 0 checked for non-XML input, got %d", r.Checked)
+	if r.Checked != 1 || r.OK() {
+		t.Errorf("expected structural violation for non-XML input, got %+v", r)
+	}
+}
+
+func TestOutputUsesGraphAsAuthority(t *testing.T) {
+	text := "Modify pkg/known.go and pkg/unknown.go; use function:example/pkg.Known."
+	r := Output(text, "", validationRunner{})
+	if r.Checked != 3 {
+		t.Fatalf("expected three references checked, got %d", r.Checked)
+	}
+	if len(r.Violations) != 1 || r.Violations[0].Ref != "pkg/unknown.go" {
+		t.Fatalf("expected only unknown path to fail, got %+v", r.Violations)
+	}
+}
+
+func TestOutputValidatesAllScannerSupportedPaths(t *testing.T) {
+	text := "Modify config/widget.yaml and docs/design.md; do not use config/missing.yaml."
+	r := Output(text, "", validationRunner{})
+	if r.Checked != 3 {
+		t.Fatalf("expected three repository paths checked, got %d", r.Checked)
+	}
+	if len(r.Violations) != 1 || r.Violations[0].Ref != "config/missing.yaml" {
+		t.Fatalf("expected only unknown YAML path to fail, got %+v", r.Violations)
+	}
+}
+
+func TestClaudeXMLRequiresUnambiguousGraphFunction(t *testing.T) {
+	xml := `<files>
+- pkg/known.go — implementation
+</files>
+<functions>
+- Known — implementation
+</functions>
+<tests>
+- Needed: no existing test identified
+</tests>`
+	r := ClaudeXML(xml, "", validationRunner{})
+	if !r.OK() {
+		t.Fatalf("expected graph-backed XML validation to pass, got %+v", r)
+	}
+
+	if strings.Contains(r.Report(), "violation") {
+		t.Fatalf("unexpected validation report: %s", r.Report())
+	}
+}
+
+func TestClaudeXMLDoesNotTreatImplementationAsTest(t *testing.T) {
+	xml := `<files>
+- pkg/known.go — implementation
+</files>
+<functions>
+- Known — implementation
+</functions>
+<tests>
+- pkg/known.go — related behavior
+</tests>`
+	r := ClaudeXML(xml, "", validationRunner{})
+	if r.OK() {
+		t.Fatalf("expected implementation file to fail test-specific validation")
+	}
+	if len(r.Violations) != 1 || r.Violations[0].Ref != "pkg/known.go" {
+		t.Fatalf("expected test-file violation, got %+v", r.Violations)
+	}
+}
+
+func TestClaudeXMLRejectsNonFunctionEntityID(t *testing.T) {
+	xml := `<files>
+- pkg/known.go — implementation
+</files>
+<functions>
+- controller:example/pkg.Controller — not a function
+</functions>
+<tests>
+- Needed: no existing test identified
+</tests>`
+	r := ClaudeXML(xml, "", validationRunner{})
+	if r.OK() {
+		t.Fatalf("expected non-function entity ID to fail function validation")
+	}
+	if len(r.Violations) != 1 || r.Violations[0].Kind != "entity" {
+		t.Fatalf("expected function entity violation, got %+v", r.Violations)
 	}
 }
 

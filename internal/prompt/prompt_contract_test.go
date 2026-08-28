@@ -73,6 +73,24 @@ func TestClaude_ContractStrings(t *testing.T) {
 	}
 }
 
+func TestClaudeDoesNotChooseAmongAmbiguousControllers(t *testing.T) {
+	output := BuildClaude("test jira", "atlas data", "", "", "", "", nil, []ControllerEntry{
+		{ID: "controller:a", File: "pkg/a.go", Role: "unknown"},
+		{ID: "controller:b", File: "pkg/b.go", Role: "api"},
+	})
+	if !strings.Contains(output, "IMPLEMENTATION CONTROLLER: ambiguous") || !strings.Contains(output, "do not choose one") {
+		t.Fatalf("ambiguous controller warning missing from Claude prompt:\n%s", output)
+	}
+
+	output = BuildClaude("test jira", "atlas data", "", "", "", "", nil, []ControllerEntry{
+		{ID: "controller:a", File: "pkg/a.go", Role: "workload"},
+		{ID: "controller:b", File: "pkg/b.go", Role: "workload"},
+	})
+	if !strings.Contains(output, "IMPLEMENTATION CONTROLLER: ambiguous") {
+		t.Fatalf("multiple workload controllers must remain ambiguous:\n%s", output)
+	}
+}
+
 func TestAsk_ContractStrings(t *testing.T) {
 	output := BuildAsk("what does Reconcile do?", "atlas output", "explain")
 
@@ -100,6 +118,21 @@ func TestGenerate_ContractStrings(t *testing.T) {
 	}
 }
 
+func TestGenerateWithSources_ContractStrings(t *testing.T) {
+	output := BuildGenerateWithSources(
+		"generate a controller",
+		"atlas data",
+		"",
+		"",
+		[]FileContent{{Path: "pkg/controller.go", Code: "package controllers"}},
+	)
+	for _, s := range []string{"Graph-Selected Source Context", "pkg/controller.go", "not permission to", "invent additional"} {
+		if !strings.Contains(output, s) {
+			t.Errorf("generate source prompt missing required constraint: %q", s)
+		}
+	}
+}
+
 func TestReview_ContractStrings(t *testing.T) {
 	output := BuildReview("diff and atlas packet", "HyperShift conventions")
 
@@ -107,6 +140,7 @@ func TestReview_ContractStrings(t *testing.T) {
 		"supplemental local pull-request reviewer",
 		"untrusted data",
 		"exact changed line",
+		"diffExcerpt",
 		"### Findings",
 		"### Verification additions",
 	}

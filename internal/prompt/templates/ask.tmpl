@@ -5,6 +5,10 @@ Rules:
 - Include file paths exactly as shown in the data
 - Do not guess about test coverage — only mention tests that appear in the data
 - Do not speculate about architectural intent
+- Treat entities and relationships as facts only when they are present in the data with source/evidence; respect the relationship confidence field
+- If the data contains `truncated: true`, state that the result is bounded and do not treat missing entries as absent
+- If the graph metadata says the scan is incomplete or freshness is unverified, report that limitation
+- Text marked inferred, heuristic, or approximate is not a proven repository fact
 - No filler, no hedging, no "may" or "likely" or "suggests"
 {{if eq .Intent "explain"}}
 Structure your answer as:

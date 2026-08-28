@@ -12,9 +12,10 @@ import (
 	"github.com/vsolanki12/codeatlas-assistant/internal/style"
 )
 
-var entityIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document):[a-zA-Z0-9._]+`)
-var crdIDPattern = regexp.MustCompile(`crd:[a-zA-Z0-9._]+`)
-var controllerWithPathPattern = regexp.MustCompile(`(controller:[a-zA-Z0-9._]+)\s*\|\s*([^\s|]+)`)
+var entityIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document|resource):[a-zA-Z0-9._/@+\-]+`)
+var crdIDPattern = regexp.MustCompile(`crd:[a-zA-Z0-9._/@+\-]+`)
+var controllerWithPathPattern = regexp.MustCompile(`(controller:[a-zA-Z0-9._/@+\-]+)\s*\|\s*([^\s|]+)`)
+var jsonControllerPattern = regexp.MustCompile(`(?s)"id"\s*:\s*"(controller:[^"]+)".{0,700}?"source"\s*:\s*\{.*?"file"\s*:\s*"([^"]+)"`)
 
 type ControllerInfo struct {
 	ID   string
@@ -27,6 +28,39 @@ type Result struct {
 	StyleCode   string
 	Terms       []string
 	Controllers []ControllerInfo
+}
+
+// SelectWorkload returns a workload controller only when the graph-backed
+// routing result identifies exactly one. Multiple controllers are a real
+// ambiguity, not permission for the Assistant to choose one by iteration
+// order or display-name similarity.
+func SelectWorkload(controllers []ControllerInfo) (ControllerInfo, bool) {
+	var selected ControllerInfo
+	count := 0
+	for _, controller := range controllers {
+		if controller.Role != "workload" {
+			continue
+		}
+		selected = controller
+		count++
+	}
+	return selected, count == 1
+}
+
+// SelectImplementationController chooses a single graph-backed controller for
+// implementation workflows. A uniquely classified workload controller wins;
+// when none is classified as workload, one total controller is still safe to
+// select. Multiple candidates remain ambiguous and must not be resolved by
+// ranking or iteration order.
+func SelectImplementationController(controllers []ControllerInfo) (ControllerInfo, bool) {
+	selected, uniqueWorkload := SelectWorkload(controllers)
+	if uniqueWorkload {
+		return selected, true
+	}
+	if len(controllers) == 1 {
+		return controllers[0], true
+	}
+	return ControllerInfo{}, false
 }
 
 func FromJIRA(a atlas.Runner, jiraText string) Result {
@@ -48,7 +82,7 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 	var atlasData strings.Builder
 
 	for _, term := range terms {
-		result, err := a.Run("search", term)
+		result, err := atlasRun(a, "search", term, "--compact")
 		if err != nil || strings.Contains(result, "No matching") {
 			continue
 		}
@@ -68,12 +102,22 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 		term := terms[i]
 		fmt.Fprintf(os.Stderr, "--- Deep dive: %s ---\n", term)
 
-		explainResult, err := a.Run("explain", term)
+		if _, structured := a.(atlas.JSONRunner); structured {
+			askResult, err := atlasRun(a, "ask", term, "--intent", "debug", "--compact")
+			if err == nil && !atlas.IsAmbiguous(askResult) && !strings.Contains(askResult, "not found") {
+				atlasData.WriteString(fmt.Sprintf("### Ask (debug): %s\n%s\n", term, askResult))
+			} else if atlas.IsAmbiguous(askResult) {
+				fmt.Fprintf(os.Stderr, "  ambiguous Atlas match skipped: %s\n", term)
+			}
+			continue
+		}
+
+		explainResult, err := atlasRun(a, "explain", term)
 		if err == nil && !strings.Contains(explainResult, "not found") {
 			atlasData.WriteString(fmt.Sprintf("### Explain: %s\n%s\n", term, explainResult))
 		}
 
-		investigateResult, err := a.Run("investigate", term)
+		investigateResult, err := atlasRun(a, "investigate", term)
 		if err == nil && !strings.Contains(investigateResult, "not found") {
 			atlasData.WriteString(fmt.Sprintf("### Investigate: %s\n%s\n", term, investigateResult))
 		}
@@ -82,12 +126,12 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 	discoverControllers(a, &atlasData)
 	expandRelatedEntities(a, terms, &atlasData)
 
-	if atlasData.Len() > 40000 {
-		fmt.Fprintf(os.Stderr, "atlas data: %d chars (capped to 40000)\n", atlasData.Len())
-		truncated := atlasData.String()[:40000]
+	const atlasDataLimit = 24000
+	if atlasData.Len() > atlasDataLimit {
+		fmt.Fprintf(os.Stderr, "atlas data: %d chars (capped to %d)\n", atlasData.Len(), atlasDataLimit)
+		data := atlasData.String()
 		atlasData.Reset()
-		atlasData.WriteString(truncated)
-		atlasData.WriteString("\n... (truncated)\n")
+		atlasData.WriteString(limitSections(data, atlasDataLimit))
 	}
 
 	styleCode := style.LoadReference("", atlasData.String(), a.GraphPath())
@@ -107,20 +151,29 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 }
 
 func extractControllers(data string, a atlas.Runner) []ControllerInfo {
-	matches := controllerWithPathPattern.FindAllStringSubmatch(data, -1)
 	seen := make(map[string]bool)
 	var controllers []ControllerInfo
-	for _, m := range matches {
-		id, file := m[1], m[2]
+	add := func(id, file string) {
 		if idx := strings.LastIndex(file, ":"); idx > 0 {
 			file = file[:idx]
 		}
 		if seen[id] {
-			continue
+			return
 		}
 		seen[id] = true
 		role := classifyController(a, id)
 		controllers = append(controllers, ControllerInfo{ID: id, File: file, Role: role})
+	}
+	for _, ref := range atlas.EntityRefs(data) {
+		if strings.HasPrefix(ref.ID, "controller:") {
+			add(ref.ID, ref.Source.File)
+		}
+	}
+	for _, m := range controllerWithPathPattern.FindAllStringSubmatch(data, -1) {
+		add(m[1], m[2])
+	}
+	for _, m := range jsonControllerPattern.FindAllStringSubmatch(data, -1) {
+		add(m[1], m[2])
 	}
 	return controllers
 }
@@ -132,7 +185,10 @@ func rankControllers(controllers []ControllerInfo, terms []string) {
 		if controllers[i].Role != controllers[j].Role {
 			return controllers[i].Role == "workload"
 		}
-		return si > sj
+		if si != sj {
+			return si > sj
+		}
+		return controllers[i].ID < controllers[j].ID
 	})
 }
 
@@ -147,28 +203,47 @@ func controllerTermScore(c ControllerInfo, terms []string) int {
 	return score
 }
 
-// classifyController uses heuristic keyword matching on atlas investigate
-// output to guess whether a controller manages workloads. This is NOT a
-// graph-proven fact — the result is inferred.
+// classifyController uses only explicit CodeAtlas relationship edges. The
+// assistant does not inspect source files or infer a component topology to
+// classify a controller. A creates/owns edge is sufficient to route workload
+// context; everything else remains unknown.
 func classifyController(a atlas.Runner, controllerID string) string {
-	name := controllerID
-	if idx := strings.LastIndex(name, "."); idx != -1 {
-		name = name[idx+1:]
-	}
-	name = strings.TrimPrefix(name, "controller:")
-
-	result, err := a.Run("investigate", name)
+	result, err := atlasRun(a, "investigate", controllerID, "--compact")
 	if err != nil || result == "" {
 		return "unknown"
 	}
-	lower := strings.ToLower(result)
-	if strings.Contains(lower, "creates") &&
-		(strings.Contains(lower, "deployment") ||
-			strings.Contains(lower, "statefulset") ||
-			strings.Contains(lower, "daemonset")) {
-		return "workload"
+	for _, relationship := range atlas.RelationshipRefs(result) {
+		if relationship.From != controllerID {
+			continue
+		}
+		if relationship.Type == "creates" || relationship.Type == "owns" {
+			return "workload"
+		}
 	}
-	return "api"
+	return "unknown"
+}
+
+func limitSections(data string, max int) string {
+	if max <= 0 || len(data) <= max {
+		return data
+	}
+	marker := "\n... (remaining Atlas sections omitted; request exact entity IDs for more context)\n"
+	var result strings.Builder
+	for _, part := range strings.Split(data, "### ") {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		section := "### " + part
+		if result.Len()+len(section)+len(marker) > max {
+			break
+		}
+		result.WriteString(section)
+	}
+	if result.Len() == 0 {
+		return marker
+	}
+	result.WriteString(marker)
+	return result.String()
 }
 
 func discoverControllers(a atlas.Runner, atlasData *strings.Builder) {
@@ -192,7 +267,7 @@ func discoverControllers(a atlas.Runner, atlasData *strings.Builder) {
 
 	fmt.Fprintf(os.Stderr, "--- Discovering controllers for %d CRDs ---\n", len(unique))
 	for _, crdID := range unique {
-		result, err := a.Run("context", crdID, "--depth", "2")
+		result, err := atlasRun(a, "context", crdID, "--depth", "2", "--compact")
 		if err != nil || strings.Contains(result, "Empty subgraph") {
 			continue
 		}
@@ -239,17 +314,18 @@ func expandRelatedEntities(a atlas.Runner, searchedTerms []string, atlasData *st
 
 	fmt.Fprintf(os.Stderr, "--- Expanding %d related entities ---\n", len(novel))
 	for _, id := range novel {
-		parts := strings.SplitN(id, ":", 2)
-		name := parts[1]
-		if idx := strings.LastIndex(name, "."); idx != -1 {
-			name = name[idx+1:]
-		}
-
-		result, err := a.Run("investigate", name)
+		result, err := atlasRun(a, "investigate", id, "--compact")
 		if err != nil || strings.Contains(result, "not found") {
 			continue
 		}
 		atlasData.WriteString(fmt.Sprintf("### Related: %s\n%s\n", id, result))
 		fmt.Fprintf(os.Stderr, "  expanded: %s\n", id)
 	}
+}
+
+func atlasRun(a atlas.Runner, args ...string) (string, error) {
+	if jr, ok := a.(atlas.JSONRunner); ok {
+		return jr.RunJSON(args...)
+	}
+	return a.Run(args...)
 }

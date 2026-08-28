@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/vsolanki12/codeatlas-assistant/internal/atlas"
-	"github.com/vsolanki12/codeatlas-assistant/internal/prompt"
 )
 
 type FileContent struct {
@@ -24,48 +24,51 @@ type WorkingSet struct {
 	Functions  []string
 }
 
-func Build(repoPath, atlasData, apiTypes, controllerFile, jiraText string, framework *prompt.FrameworkInfo, a ...atlas.Runner) *WorkingSet {
+func Build(repoPath, atlasData, apiTypes, controllerFile string, a ...atlas.Runner) *WorkingSet {
+	return build(repoPath, atlasData, apiTypes, "", controllerFile, a...)
+}
+
+// BuildForController is the strict routing variant used by implementation
+// workflows after gather has selected one exact graph controller ID.
+func BuildForController(repoPath, atlasData, apiTypes, controllerID, controllerFile string, a ...atlas.Runner) *WorkingSet {
+	return build(repoPath, atlasData, apiTypes, controllerID, controllerFile, a...)
+}
+
+func build(repoPath, atlasData, apiTypes, selectedControllerID, controllerFile string, a ...atlas.Runner) *WorkingSet {
 	ws := &WorkingSet{
 		Types: apiTypes,
 	}
 
 	functions := extractFunctions(atlasData)
-	ws.Functions = functions
-
-	if controllerFile != "" {
-		absPath := filepath.Join(repoPath, controllerFile)
-		code := readFileCapped(absPath, 500)
-		if code != "" {
-			ws.ImplFiles = append(ws.ImplFiles, FileContent{Path: controllerFile, Code: code})
+	functionIDs := extractFunctionIDs(atlasData)
+	if selectedControllerID != "" {
+		if selected := extractFunctionIDsForController(atlasData, selectedControllerID); len(selected) > 0 {
+			functionIDs = selected
+		} else {
+			functionIDs = nil
 		}
 	}
-
-	if controllerFile != "" {
-		absPath := filepath.Join(repoPath, controllerFile)
-		content, err := os.ReadFile(absPath)
-		if err == nil {
-			src := string(content)
-			for _, fn := range functions {
-				block := extractFuncBlock(src, fn)
-				if block != "" && len(block) < 3000 {
-					ws.ImplFiles = append(ws.ImplFiles, FileContent{
-						Path: controllerFile + " → " + fn + "()",
-						Code: block,
-					})
-					break
-				}
-			}
-		}
+	// Preserve repository-unique IDs in the prompt. Bare names are retained
+	// only for compatibility with older text-only Atlas output.
+	ws.Functions = append([]string(nil), functionIDs...)
+	if len(ws.Functions) == 0 && selectedControllerID == "" {
+		ws.Functions = functions
+	}
+	controllerID := selectedControllerID
+	if controllerID == "" {
+		controllerID = extractControllerIDForFile(atlasData, controllerFile)
+	}
+	if controllerFile == "" && controllerID != "" {
+		controllerFile = extractControllerFileForID(atlasData, controllerID)
 	}
 
-	if framework != nil {
-		relevant := extractReferencedComponents(atlasData, framework.RelPath)
-		jiraComponents := extractJIRAComponents(jiraText, framework)
-		for k := range jiraComponents {
-			relevant[k] = true
-		}
-		componentFiles := loadComponentFiles(repoPath, framework, relevant)
-		ws.ImplFiles = append(ws.ImplFiles, componentFiles...)
+	refs := atlas.EntityRefs(atlasData)
+	relationships := atlas.RelationshipRefs(atlasData)
+	appendGraphSelectedSources(ws, repoPath, refs, relationships, controllerFile, selectedControllerID)
+	if len(ws.ImplFiles) == 0 && controllerFile != "" {
+		// Compatibility path for older text-only Atlas output that has names but
+		// no structured source spans. It remains limited to the selected file.
+		appendLegacyFunctionSource(ws, repoPath, controllerFile, functions)
 	}
 
 	var runner atlas.Runner
@@ -73,31 +76,11 @@ func Build(repoPath, atlasData, apiTypes, controllerFile, jiraText string, frame
 		runner = a[0]
 	}
 
-	if runner != nil && controllerFile != "" {
-		ws.TestFiles = findTestsFromGraph(runner, repoPath, controllerFile, ws.Functions)
+	if runner != nil && controllerFile != "" && controllerID != "" {
+		ws.TestFiles = findTestsFromGraph(runner, repoPath, controllerID, functionIDs)
 	}
 
-	if len(ws.TestFiles) == 0 {
-		testDirs := make(map[string]bool)
-		for _, f := range ws.ImplFiles {
-			dir := filepath.Dir(f.Path)
-			if !strings.Contains(dir, "→") {
-				testDirs[dir] = true
-			}
-		}
-		for dir := range testDirs {
-			tests := findTestFiles(repoPath, dir)
-			for _, t := range tests {
-				code := readFileCapped(filepath.Join(repoPath, t), 200)
-				if code != "" {
-					ws.TestFiles = append(ws.TestFiles, FileContent{Path: t, Code: code})
-				}
-				if len(ws.TestFiles) >= 3 {
-					break
-				}
-			}
-		}
-	}
+	limitWorkingSet(ws, 24000)
 
 	return ws
 }
@@ -113,125 +96,31 @@ func (ws *WorkingSet) TotalChars() int {
 	return total
 }
 
-func loadComponentFiles(repoPath string, framework *prompt.FrameworkInfo, relevant map[string]bool) []FileContent {
-	type compInfo struct {
-		name         string
-		workloadFile string
-	}
-
-	var matched, unmatched []compInfo
-	for _, line := range strings.Split(framework.Components, "\n") {
-		parts := strings.SplitN(line, "|", 3)
-		if len(parts) < 2 {
-			continue
-		}
-		compName := strings.TrimSpace(strings.TrimSuffix(parts[0], "/"))
-		workloadFile := ""
-		switch strings.TrimSpace(parts[1]) {
-		case "Deployment":
-			workloadFile = "deployment.go"
-		case "StatefulSet":
-			workloadFile = "statefulset.go"
-		default:
-			continue
-		}
-
-		ci := compInfo{name: compName, workloadFile: workloadFile}
-		if relevant[compName] {
-			matched = append(matched, ci)
-		} else {
-			unmatched = append(unmatched, ci)
-		}
-	}
-
-	ordered := append(matched, unmatched...)
-
-	var files []FileContent
-	for _, ci := range ordered {
-		relPath := filepath.Join(framework.RelPath, ci.name, ci.workloadFile)
-		absPath := filepath.Join(repoPath, relPath)
-		code := readFileCapped(absPath, 300)
-		if code != "" {
-			files = append(files, FileContent{Path: relPath, Code: code})
-		}
-		if len(files) >= 5 {
-			break
-		}
-	}
-	return files
-}
-
-func extractJIRAComponents(jiraText string, framework *prompt.FrameworkInfo) map[string]bool {
-	components := make(map[string]bool)
-	lower := strings.ToLower(jiraText)
-
-	for _, line := range strings.Split(framework.Components, "\n") {
-		parts := strings.SplitN(line, "|", 3)
-		if len(parts) < 1 {
-			continue
-		}
-		name := strings.TrimSuffix(strings.TrimSpace(parts[0]), "/")
-		if name == "" {
-			continue
-		}
-
-		variants := []string{
-			name,
-			strings.ReplaceAll(name, "_", "-"),
-			strings.ReplaceAll(name, "_", " "),
-			strings.ReplaceAll(name, "_", ""),
-		}
-		for _, v := range variants {
-			if strings.Contains(lower, v) {
-				components[name] = true
-				break
-			}
-		}
-	}
-
-	return components
-}
-
-var filePathPattern = regexp.MustCompile(`(?:^|\s|/)(\S+\.go)(?::\d+)?`)
-var packagePattern = regexp.MustCompile(`(?:function|package):(\w+)\.`)
-
-func extractReferencedComponents(atlasData, frameworkPath string) map[string]bool {
-	components := make(map[string]bool)
-	frameworkParts := strings.Split(frameworkPath, "/")
-
-	for _, match := range filePathPattern.FindAllStringSubmatch(atlasData, -1) {
-		path := match[1]
-		if !strings.Contains(path, frameworkPath) {
-			continue
-		}
-		parts := strings.Split(path, "/")
-		for i, p := range parts {
-			if i+1 < len(parts) && i >= len(frameworkParts) {
-				components[p] = true
-				break
-			}
-		}
-	}
-
-	for _, match := range packagePattern.FindAllStringSubmatch(atlasData, -1) {
-		pkg := match[1]
-		if len(pkg) >= 2 {
-			components[pkg] = true
-		}
-	}
-
-	return components
-}
-
-var funcEntityPattern = regexp.MustCompile(`function:\w+\.(?:\w+\.)?(\w+)`)
+var funcEntityPattern = regexp.MustCompile(`function:[a-zA-Z0-9._/@+\-]+`)
 var callsPattern = regexp.MustCompile(`(?:Calls|calls):\s*(.+)`)
 
 func extractFunctions(atlasData string) []string {
 	seen := make(map[string]bool)
 	var funcs []string
 
-	for _, match := range funcEntityPattern.FindAllStringSubmatch(atlasData, -1) {
-		name := match[1]
+	// Prefer the structured graph result. The text patterns below are retained
+	// for compatibility with older Atlas binaries that did not support JSON.
+	for _, ref := range atlas.EntityRefs(atlasData) {
+		if ref.Kind != "function" && !strings.HasPrefix(ref.ID, "function:") {
+			continue
+		}
+		name := ref.Name
+		if name == "" {
+			name = ref.ID[strings.LastIndex(ref.ID, ".")+1:]
+		}
+		if !seen[name] && len(name) > 3 {
+			seen[name] = true
+			funcs = append(funcs, name)
+		}
+	}
+
+	for _, match := range funcEntityPattern.FindAllString(atlasData, -1) {
+		name := match[strings.LastIndex(match, ".")+1:]
 		if !seen[name] && len(name) > 3 {
 			seen[name] = true
 			funcs = append(funcs, name)
@@ -252,6 +141,211 @@ func extractFunctions(atlasData string) []string {
 	}
 
 	return funcs
+}
+
+func extractFunctionIDs(atlasData string) []string {
+	seen := make(map[string]bool)
+	var ids []string
+	for _, ref := range atlas.EntityRefs(atlasData) {
+		if ref.Kind == "function" || strings.HasPrefix(ref.ID, "function:") {
+			if !seen[ref.ID] {
+				seen[ref.ID] = true
+				ids = append(ids, ref.ID)
+			}
+		}
+	}
+	for _, id := range funcEntityPattern.FindAllString(atlasData, -1) {
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func extractFunctionIDsForController(atlasData, controllerID string) []string {
+	seen := make(map[string]bool)
+	var ids []string
+	for _, relationship := range atlas.RelationshipRefs(atlasData) {
+		if relationship.From != controllerID || relationship.Type != "calls" || !strings.HasPrefix(relationship.To, "function:") {
+			continue
+		}
+		if !seen[relationship.To] {
+			seen[relationship.To] = true
+			ids = append(ids, relationship.To)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func extractControllerIDForFile(atlasData, controllerFile string) string {
+	if controllerFile == "" {
+		return ""
+	}
+	wanted := filepath.ToSlash(controllerFile)
+	for _, ref := range atlas.EntityRefs(atlasData) {
+		if ref.Kind != "controller" && !strings.HasPrefix(ref.ID, "controller:") {
+			continue
+		}
+		if filepath.ToSlash(ref.Source.File) == wanted || containsFile(ref.Files, wanted) {
+			return ref.ID
+		}
+	}
+	return ""
+}
+
+func containsFile(files []string, wanted string) bool {
+	for _, file := range files {
+		if filepath.ToSlash(file) == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func extractControllerFileForID(atlasData, controllerID string) string {
+	for _, ref := range atlas.EntityRefs(atlasData) {
+		if ref.ID == controllerID && (ref.Kind == "controller" || strings.HasPrefix(ref.ID, "controller:")) {
+			if ref.Source.File != "" {
+				return ref.Source.File
+			}
+			for _, file := range ref.Files {
+				if file != "" && !strings.HasSuffix(file, "_test.go") {
+					return file
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// appendGraphSelectedSources reads only source files and spans named by Atlas
+// entities. It deliberately does not discover files, parse packages, or infer
+// related implementation locations.
+func appendGraphSelectedSources(ws *WorkingSet, repoPath string, refs []atlas.EntityRef, relationships []atlas.RelationshipRef, controllerFile, selectedControllerID string) {
+	files := make(map[string]bool)
+	allowed := make(map[string]bool)
+	if selectedControllerID != "" {
+		allowed[selectedControllerID] = true
+		for _, relationship := range relationships {
+			if relationship.From == selectedControllerID && relationship.Type == "calls" && strings.HasPrefix(relationship.To, "function:") {
+				allowed[relationship.To] = true
+			}
+		}
+	}
+	if controllerFile != "" {
+		files[filepath.ToSlash(controllerFile)] = true
+	}
+	for _, ref := range refs {
+		if ref.Kind != "function" && ref.Kind != "controller" {
+			continue
+		}
+		if selectedControllerID != "" && !allowed[ref.ID] {
+			continue
+		}
+		if ref.Source.File != "" && !strings.HasSuffix(ref.Source.File, "_test.go") {
+			files[filepath.ToSlash(ref.Source.File)] = true
+		}
+		for _, file := range ref.Files {
+			if file != "" && !strings.HasSuffix(file, "_test.go") {
+				files[filepath.ToSlash(file)] = true
+			}
+		}
+	}
+
+	paths := make([]string, 0, len(files))
+	for file := range files {
+		paths = append(paths, file)
+	}
+	sort.Strings(paths)
+
+	added := make(map[string]bool)
+	for _, file := range paths {
+		fullPath, ok := safeRepositoryFile(repoPath, file)
+		if !ok {
+			continue
+		}
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		source := string(content)
+		if file == filepath.ToSlash(controllerFile) {
+			if code := readFileCapped(fullPath, 160); code != "" {
+				ws.ImplFiles = append(ws.ImplFiles, FileContent{Path: file, Code: code})
+			}
+		}
+
+		for _, ref := range refs {
+			if ref.Kind != "function" || filepath.ToSlash(ref.Source.File) != file || ref.Source.Line <= 0 || added[ref.ID] {
+				continue
+			}
+			block := ""
+			if ref.Source.EndLine > 0 {
+				block = extractLines(source, ref.Source.Line, ref.Source.EndLine)
+			}
+			if block == "" {
+				// Older graph versions did not carry EndLine. Fall back to the
+				// function parser rather than silently sending one source line.
+				block = extractFuncBlock(source, ref.Name)
+			}
+			if block == "" || len(block) >= 3000 {
+				continue
+			}
+			name := ref.Name
+			if name == "" {
+				name = ref.ID[strings.LastIndex(ref.ID, ".")+1:]
+			}
+			ws.ImplFiles = append(ws.ImplFiles, FileContent{
+				Path: file + " → " + name + "()",
+				Code: block,
+			})
+			added[ref.ID] = true
+		}
+	}
+}
+
+func appendLegacyFunctionSource(ws *WorkingSet, repoPath, controllerFile string, functions []string) {
+	fullPath, ok := safeRepositoryFile(repoPath, controllerFile)
+	if !ok {
+		return
+	}
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return
+	}
+	source := string(content)
+	for _, fn := range functions {
+		block := extractFuncBlock(source, fn)
+		if block != "" && len(block) < 3000 {
+			ws.ImplFiles = append(ws.ImplFiles, FileContent{
+				Path: filepath.ToSlash(controllerFile) + " → " + fn + "()",
+				Code: block,
+			})
+			return
+		}
+	}
+}
+
+func safeRepositoryFile(repoPath, relativePath string) (string, bool) {
+	if repoPath == "" || relativePath == "" {
+		return "", false
+	}
+	root, err := filepath.Abs(repoPath)
+	if err != nil {
+		return "", false
+	}
+	clean := filepath.Clean(filepath.FromSlash(relativePath))
+	if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	full := filepath.Join(root, clean)
+	rel, err := filepath.Rel(root, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return full, true
 }
 
 func extractFuncBlock(content, funcName string) string {
@@ -291,45 +385,41 @@ func extractFuncBlock(content, funcName string) string {
 	return ""
 }
 
+func extractLines(content string, startLine, endLine int) string {
+	lines := strings.Split(content, "\n")
+	if startLine <= 0 || startLine > len(lines) {
+		return ""
+	}
+	if endLine < startLine || endLine > len(lines) {
+		endLine = startLine
+	}
+	return strings.Join(lines[startLine-1:endLine], "\n")
+}
+
 var testPathPattern = regexp.MustCompile(`(\S+_test\.go)(?::\d+)?`)
 
-func findTestsFromGraph(a atlas.Runner, repoPath string, controllerFile string, functions []string) []FileContent {
+func findTestsFromGraph(a atlas.Runner, repoPath string, controllerID string, functionIDs []string) []FileContent {
 	seen := make(map[string]bool)
 	var testPaths []string
-
-	name := filepath.Base(controllerFile)
-	name = strings.TrimSuffix(name, ".go")
-	parts := strings.Split(name, "_")
-	if len(parts) > 1 && parts[len(parts)-1] == "controller" {
-		name = parts[0]
+	structured := false
+	if _, structured = a.(atlas.JSONRunner); structured {
+		structured = true
 	}
 
-	out, err := a.Run("investigate", name)
+	out, err := runAtlas(a, "investigate", controllerID, "--compact")
 	if err == nil {
-		for _, match := range testPathPattern.FindAllStringSubmatch(out, -1) {
-			p := match[1]
-			if !seen[p] {
-				seen[p] = true
-				testPaths = append(testPaths, p)
-			}
-		}
+		appendTestPaths(out, structured, seen, &testPaths)
 	}
 
-	for _, fn := range functions {
+	for _, fn := range functionIDs {
 		if len(testPaths) >= 3 {
 			break
 		}
-		out, err := a.Run("impact", fn)
+		out, err := runAtlas(a, "impact", fn, "--compact")
 		if err != nil {
 			continue
 		}
-		for _, match := range testPathPattern.FindAllStringSubmatch(out, -1) {
-			p := match[1]
-			if !seen[p] {
-				seen[p] = true
-				testPaths = append(testPaths, p)
-			}
-		}
+		appendTestPaths(out, structured, seen, &testPaths)
 	}
 
 	var files []FileContent
@@ -337,7 +427,11 @@ func findTestsFromGraph(a atlas.Runner, repoPath string, controllerFile string, 
 		if len(files) >= 3 {
 			break
 		}
-		code := readFileCapped(filepath.Join(repoPath, p), 200)
+		fullPath, ok := safeRepositoryFile(repoPath, p)
+		if !ok {
+			continue
+		}
+		code := readFileCapped(fullPath, 200)
 		if code != "" {
 			files = append(files, FileContent{Path: p, Code: code})
 		}
@@ -345,19 +439,33 @@ func findTestsFromGraph(a atlas.Runner, repoPath string, controllerFile string, 
 	return files
 }
 
-func findTestFiles(repoPath, relDir string) []string {
-	absDir := filepath.Join(repoPath, relDir)
-	entries, err := os.ReadDir(absDir)
-	if err != nil {
-		return nil
+func appendTestPaths(data string, structured bool, seen map[string]bool, paths *[]string) {
+	if structured {
+		for _, ref := range atlas.EntityRefs(data) {
+			if ref.Kind != "test" && !strings.HasPrefix(ref.ID, "test:") {
+				continue
+			}
+			if strings.HasSuffix(ref.Source.File, "_test.go") && !seen[ref.Source.File] {
+				seen[ref.Source.File] = true
+				*paths = append(*paths, ref.Source.File)
+			}
+		}
+		return
 	}
-	var tests []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), "_test.go") {
-			tests = append(tests, filepath.Join(relDir, e.Name()))
+	for _, match := range testPathPattern.FindAllStringSubmatch(data, -1) {
+		p := match[1]
+		if !seen[p] {
+			seen[p] = true
+			*paths = append(*paths, p)
 		}
 	}
-	return tests
+}
+
+func runAtlas(a atlas.Runner, args ...string) (string, error) {
+	if jr, ok := a.(atlas.JSONRunner); ok {
+		return jr.RunJSON(args...)
+	}
+	return a.Run(args...)
 }
 
 func readFileCapped(path string, maxLines int) string {
@@ -373,120 +481,38 @@ func readFileCapped(path string, maxLines int) string {
 	return strings.Join(lines, "\n")
 }
 
-var skipDirs = map[string]bool{
-	"vendor": true, ".git": true, "_output": true, "client": true,
-	"hack": true, "bin": true, "node_modules": true,
-}
-
-func DetectFramework(repoRoot string) *prompt.FrameworkInfo {
-	parentCounts := make(map[string][]string)
-
-	filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if info.IsDir() {
-			if skipDirs[info.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if info.Name() == "component.go" {
-			dir := filepath.Dir(path)
-			parent := filepath.Dir(dir)
-			rel, err := filepath.Rel(repoRoot, dir)
-			if err != nil {
-				return nil
-			}
-			parentRel, _ := filepath.Rel(repoRoot, parent)
-			parentCounts[parentRel] = append(parentCounts[parentRel], rel)
-		}
-		return nil
-	})
-
-	var bestParent string
-	var bestChildren []string
-	for parent, children := range parentCounts {
-		if len(children) > len(bestChildren) {
-			bestParent = parent
-			bestChildren = children
-		}
+func limitWorkingSet(ws *WorkingSet, maxChars int) {
+	if maxChars <= 0 {
+		return
 	}
-
-	if len(bestChildren) < 3 {
-		return nil
+	remaining := maxChars
+	ws.Types = limitText(ws.Types, &remaining)
+	for i := range ws.ImplFiles {
+		ws.ImplFiles[i].Code = limitText(ws.ImplFiles[i].Code, &remaining)
 	}
-
-	var lines []string
-	for _, compDir := range bestChildren {
-		name := filepath.Base(compDir)
-		absDir := filepath.Join(repoRoot, compDir)
-		goFiles, err := os.ReadDir(absDir)
-		if err != nil {
-			continue
-		}
-
-		workloadType := ""
-		var fileNames []string
-		for _, f := range goFiles {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".go") {
-				continue
-			}
-			if strings.HasSuffix(f.Name(), "_test.go") {
-				continue
-			}
-			fileNames = append(fileNames, f.Name())
-			switch f.Name() {
-			case "deployment.go":
-				workloadType = "Deployment"
-			case "statefulset.go":
-				workloadType = "StatefulSet"
-			}
-		}
-		if len(fileNames) == 0 {
-			continue
-		}
-		if workloadType == "" {
-			workloadType = "Other"
-		}
-		lines = append(lines, fmt.Sprintf("%s/ | %s | %s",
-			name, workloadType, strings.Join(fileNames, " ")))
-	}
-
-	return &prompt.FrameworkInfo{
-		RelPath:    bestParent,
-		Components: strings.Join(lines, "\n"),
-		Count:      len(lines),
+	for i := range ws.TestFiles {
+		ws.TestFiles[i].Code = limitText(ws.TestFiles[i].Code, &remaining)
 	}
 }
 
-func PromoteFrameworkController(entries []prompt.ControllerEntry, frameworkPath string) {
-	bestIdx := -1
-	bestLen := 0
-	for i, e := range entries {
-		p := commonPathPrefix(e.File, frameworkPath)
-		if len(p) > bestLen {
-			bestLen = len(p)
-			bestIdx = i
-		}
+func limitText(text string, remaining *int) string {
+	if *remaining <= 0 {
+		return ""
 	}
-	if bestIdx > 0 && bestLen > 0 {
-		entries[bestIdx].Role = "workload"
-		promoted := entries[bestIdx]
-		copy(entries[1:bestIdx+1], entries[0:bestIdx])
-		entries[0] = promoted
+	if len(text) <= *remaining {
+		*remaining -= len(text)
+		return text
 	}
-}
-
-func commonPathPrefix(a, b string) string {
-	ap := strings.Split(a, "/")
-	bp := strings.Split(b, "/")
-	var common []string
-	for i := 0; i < len(ap) && i < len(bp); i++ {
-		if ap[i] != bp[i] {
-			break
-		}
-		common = append(common, ap[i])
+	const marker = "\n// ... working set truncated at the global context budget"
+	if *remaining <= len(marker) {
+		result := text[:*remaining]
+		*remaining = 0
+		return result
 	}
-	return strings.Join(common, "/")
+	limit := *remaining - len(marker)
+	if newline := strings.LastIndex(text[:limit], "\n"); newline > 0 {
+		limit = newline
+	}
+	*remaining = 0
+	return text[:limit] + marker
 }
