@@ -77,7 +77,7 @@ func build(repoPath, atlasData, apiTypes, selectedControllerID, controllerFile s
 	}
 
 	if runner != nil && controllerFile != "" && controllerID != "" {
-		ws.TestFiles = findTestsFromGraph(runner, repoPath, controllerID, functionIDs)
+		ws.TestFiles = findTestsFromGraph(runner, repoPath, controllerID, functionIDs, atlasData)
 	}
 
 	limitWorkingSet(ws, 24000)
@@ -398,7 +398,7 @@ func extractLines(content string, startLine, endLine int) string {
 
 var testPathPattern = regexp.MustCompile(`(\S+_test\.go)(?::\d+)?`)
 
-func findTestsFromGraph(a atlas.Runner, repoPath string, controllerID string, functionIDs []string) []FileContent {
+func findTestsFromGraph(a atlas.Runner, repoPath string, controllerID string, functionIDs []string, atlasData string) []FileContent {
 	seen := make(map[string]bool)
 	var testPaths []string
 	structured := false
@@ -406,20 +406,42 @@ func findTestsFromGraph(a atlas.Runner, repoPath string, controllerID string, fu
 		structured = true
 	}
 
-	out, err := runAtlas(a, "investigate", controllerID, "--compact")
-	if err == nil {
-		appendTestPaths(out, structured, seen, &testPaths)
+	if structured {
+		appendGraphTestPaths(atlasData, controllerID, functionIDs, seen, &testPaths)
 	}
 
-	for _, fn := range functionIDs {
-		if len(testPaths) >= 3 {
-			break
+	if len(testPaths) == 0 {
+		var out string
+		var err error
+		if structured {
+			out, err = runAtlas(a, "ask", controllerID, "--intent", "debug", "--compact")
+		} else {
+			out, err = runAtlas(a, "investigate", controllerID, "--compact")
 		}
-		out, err := runAtlas(a, "impact", fn, "--compact")
-		if err != nil {
-			continue
+		if err == nil {
+			if structured {
+				appendGraphTestPaths(out, controllerID, functionIDs, seen, &testPaths)
+			} else {
+				appendTestPaths(out, structured, seen, &testPaths)
+			}
 		}
-		appendTestPaths(out, structured, seen, &testPaths)
+	}
+
+	if len(testPaths) == 0 {
+		for _, fn := range functionIDs {
+			if len(testPaths) >= 3 {
+				break
+			}
+			out, err := runAtlas(a, "impact", fn, "--compact")
+			if err != nil {
+				continue
+			}
+			if structured {
+				appendGraphTestPaths(out, "", []string{fn}, seen, &testPaths)
+			} else {
+				appendTestPaths(out, structured, seen, &testPaths)
+			}
+		}
 	}
 
 	var files []FileContent
@@ -437,6 +459,38 @@ func findTestsFromGraph(a atlas.Runner, repoPath string, controllerID string, fu
 		}
 	}
 	return files
+}
+
+// appendGraphTestPaths reuses only test entities connected by an explicit
+// graph relationship to the selected controller or one of its evidenced call
+// targets. A test merely appearing in a broad search result is not treated as
+// related behavior.
+func appendGraphTestPaths(data, controllerID string, functionIDs []string, seen map[string]bool, paths *[]string) {
+	allowed := map[string]bool{controllerID: true}
+	for _, functionID := range functionIDs {
+		allowed[functionID] = true
+	}
+	refs := make(map[string]atlas.EntityRef)
+	for _, ref := range atlas.EntityRefs(data) {
+		refs[ref.ID] = ref
+	}
+	for _, relationship := range atlas.RelationshipRefs(data) {
+		candidate := ""
+		if allowed[relationship.From] {
+			candidate = relationship.To
+		} else if allowed[relationship.To] {
+			candidate = relationship.From
+		}
+		if !strings.HasPrefix(candidate, "test:") || seen[candidate] {
+			continue
+		}
+		ref, ok := refs[candidate]
+		if !ok || !strings.HasSuffix(ref.Source.File, "_test.go") {
+			continue
+		}
+		seen[candidate] = true
+		*paths = append(*paths, ref.Source.File)
+	}
 }
 
 func appendTestPaths(data string, structured bool, seen map[string]bool, paths *[]string) {

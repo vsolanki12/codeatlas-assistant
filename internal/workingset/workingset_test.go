@@ -1,11 +1,28 @@
 package workingset
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+type graphTestRunner struct {
+	calls []string
+}
+
+func (r *graphTestRunner) Run(args ...string) (string, error) {
+	r.calls = append(r.calls, strings.Join(args, " "))
+	return "", fmt.Errorf("unexpected Atlas call: %s", strings.Join(args, " "))
+}
+
+func (r *graphTestRunner) RunJSON(args ...string) (string, error) {
+	r.calls = append(r.calls, strings.Join(args, " "))
+	return "", fmt.Errorf("unexpected Atlas call: %s", strings.Join(args, " "))
+}
+
+func (r *graphTestRunner) GraphPath() string { return "" }
 
 func TestExtractFuncBlock(t *testing.T) {
 	tests := []struct {
@@ -252,5 +269,30 @@ func TestBuildForControllerKeepsOnlyEvidencedCallTargets(t *testing.T) {
 	}
 	if strings.Contains(joined, "should not be selected") || strings.Contains(joined, "Unrelated()") {
 		t.Fatalf("working set included sibling function:\n%s", joined)
+	}
+}
+
+func TestFindTestsReusesExistingGraphTestRelationship(t *testing.T) {
+	repo := t.TempDir()
+	testPath := filepath.Join(repo, "controllers", "reconcile_test.go")
+	if err := os.MkdirAll(filepath.Dir(testPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(testPath, []byte("package controllers\n\nfunc TestReconcile() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	controllerID := "controller:example.com/repo/controllers.Reconciler"
+	functionID := "function:example.com/repo/controllers.Reconcile"
+	testID := "test:example.com/repo/controllers.TestReconcile"
+	atlasData := fmt.Sprintf(`{"entities":[{"id":%q,"kind":"controller","source":{"file":"controllers/reconcile.go"}},{"id":%q,"kind":"function","source":{"file":"controllers/reconcile.go"}},{"id":%q,"kind":"test","source":{"file":"controllers/reconcile_test.go"}}],"relationships":[{"id":"%s--verifies--%s","from":%q,"to":%q,"type":"verifies","confidence":"proven","evidence":{"file":"controllers/reconcile_test.go","line":3}}]}`,
+		controllerID, functionID, testID, functionID, testID, functionID, testID)
+	runner := &graphTestRunner{}
+	files := findTestsFromGraph(runner, repo, controllerID, []string{functionID}, atlasData)
+	if len(files) != 1 || files[0].Path != "controllers/reconcile_test.go" {
+		t.Fatalf("unexpected graph-selected test files: %+v", files)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("existing test relationship caused redundant Atlas calls: %v", runner.calls)
 	}
 }

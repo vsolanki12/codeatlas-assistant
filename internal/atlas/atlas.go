@@ -4,6 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/vsolanki12/codeatlas-assistant/internal/metrics"
 )
 
 type Runner interface {
@@ -21,6 +26,47 @@ type JSONRunner interface {
 
 type Client struct {
 	Path string
+
+	usageMu sync.RWMutex
+	usage   Usage
+}
+
+// Usage records the deterministic Atlas calls made by one assistant process.
+// It is intentionally a response-size measurement, not a claim about the
+// model tokenizer or provider billing.
+type Usage struct {
+	Calls    int            `json:"calls"`
+	Response metrics.Text   `json:"response"`
+	Commands map[string]int `json:"commands,omitempty"`
+}
+
+// LastUsage returns cumulative Atlas measurements for this client.
+func (c *Client) LastUsage() Usage {
+	c.usageMu.RLock()
+	defer c.usageMu.RUnlock()
+	usage := c.usage
+	usage.Commands = make(map[string]int, len(c.usage.Commands))
+	for command, count := range c.usage.Commands {
+		usage.Commands[command] = count
+	}
+	return usage
+}
+
+// Summary formats the measurements for a human-facing CLI diagnostic.
+func (u Usage) Summary() string {
+	commands := make([]string, 0, len(u.Commands))
+	for command := range u.Commands {
+		commands = append(commands, command)
+	}
+	sort.Strings(commands)
+	parts := make([]string, 0, len(commands))
+	for _, command := range commands {
+		parts = append(parts, fmt.Sprintf("%s=%d", command, u.Commands[command]))
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("%d calls, %s response", u.Calls, metrics.FormatText(u.Response))
+	}
+	return fmt.Sprintf("%d calls, %s response, commands: %s", u.Calls, metrics.FormatText(u.Response), strings.Join(parts, ", "))
 }
 
 func (c *Client) Run(args ...string) (string, error) {
@@ -49,6 +95,8 @@ func (c *Client) run(args []string, jsonOutput bool) (string, error) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	output := stdout.String()
+	c.recordUsage(args[0], output)
 	if err != nil {
 		if stderr.Len() > 0 {
 			return "", fmt.Errorf("%s", stderr.String())
@@ -56,7 +104,21 @@ func (c *Client) run(args []string, jsonOutput bool) (string, error) {
 		return "", fmt.Errorf("atlas %s: %w", args[0], err)
 	}
 
-	return stdout.String(), nil
+	return output, nil
+}
+
+func (c *Client) recordUsage(command, output string) {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.usage.Commands == nil {
+		c.usage.Commands = make(map[string]int)
+	}
+	c.usage.Calls++
+	c.usage.Commands[command]++
+	response := metrics.Measure(output)
+	c.usage.Response.Bytes += response.Bytes
+	c.usage.Response.Characters += response.Characters
+	c.usage.Response.EstimatedTokens += response.EstimatedTokens
 }
 
 func (c *Client) GraphPath() string {

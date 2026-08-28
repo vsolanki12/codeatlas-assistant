@@ -38,3 +38,21 @@ func TestIsAmbiguous(t *testing.T) {
 		t.Fatal("did not expect ambiguity")
 	}
 }
+
+func TestClientUsageAccumulatesDeterministically(t *testing.T) {
+	c := &Client{}
+	c.recordUsage("search", "abcd")
+	c.recordUsage("ask", "éé")
+	c.recordUsage("ask", "z")
+
+	usage := c.LastUsage()
+	if usage.Calls != 3 || usage.Response.Bytes != 9 || usage.Response.Characters != 7 {
+		t.Fatalf("unexpected usage: %+v", usage)
+	}
+	if usage.Commands["ask"] != 2 || usage.Commands["search"] != 1 {
+		t.Fatalf("unexpected command counts: %+v", usage.Commands)
+	}
+	if got := usage.Summary(); got != "3 calls, 9 bytes, 7 chars, ~3 estimated tokens response, commands: ask=2, search=1" {
+		t.Fatalf("unexpected summary: %q", got)
+	}
+}

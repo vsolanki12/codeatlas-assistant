@@ -9,6 +9,7 @@ import (
 
 	"github.com/vsolanki12/codeatlas-assistant/internal/atlas"
 	"github.com/vsolanki12/codeatlas-assistant/internal/intent"
+	"github.com/vsolanki12/codeatlas-assistant/internal/metrics"
 	"github.com/vsolanki12/codeatlas-assistant/internal/style"
 )
 
@@ -28,6 +29,15 @@ type Result struct {
 	StyleCode   string
 	Terms       []string
 	Controllers []ControllerInfo
+}
+
+const maxAtlasData = 24000
+
+// LimitAtlasData applies the same bounded section policy to all
+// implementation-oriented workflows. It only removes already retrieved
+// Atlas sections; it does not discover or infer repository facts.
+func LimitAtlasData(data string, max int) string {
+	return limitSections(data, max)
 }
 
 // SelectWorkload returns a workload controller only when the graph-backed
@@ -93,7 +103,15 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 		return Result{Terms: terms}
 	}
 
+	_, structured := a.(atlas.JSONRunner)
 	deepDiveCount := 3
+	if structured {
+		// A structured debug Ask already carries the bounded entity and edge
+		// context needed by the downstream router. Repeating the same
+		// controller/CRD expansion would spend Atlas calls without adding a
+		// different evidence source.
+		deepDiveCount = 1
+	}
 	if len(terms) < deepDiveCount {
 		deepDiveCount = len(terms)
 	}
@@ -102,7 +120,7 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 		term := terms[i]
 		fmt.Fprintf(os.Stderr, "--- Deep dive: %s ---\n", term)
 
-		if _, structured := a.(atlas.JSONRunner); structured {
+		if structured {
 			askResult, err := atlasRun(a, "ask", term, "--intent", "debug", "--compact")
 			if err == nil && !atlas.IsAmbiguous(askResult) && !strings.Contains(askResult, "not found") {
 				atlasData.WriteString(fmt.Sprintf("### Ask (debug): %s\n%s\n", term, askResult))
@@ -123,16 +141,21 @@ func FromJIRA(a atlas.Runner, jiraText string) Result {
 		}
 	}
 
-	discoverControllers(a, &atlasData)
-	expandRelatedEntities(a, terms, &atlasData)
+	if !structured {
+		// These compatibility expansions are needed only for old text-output
+		// Atlas clients. Current structured Ask results already contain the
+		// bounded graph neighborhood and relationship evidence.
+		discoverControllers(a, &atlasData)
+		expandRelatedEntities(a, terms, &atlasData)
+	}
 
-	const atlasDataLimit = 24000
-	if atlasData.Len() > atlasDataLimit {
-		fmt.Fprintf(os.Stderr, "atlas data: %d chars (capped to %d)\n", atlasData.Len(), atlasDataLimit)
+	if atlasData.Len() > maxAtlasData {
+		fmt.Fprintf(os.Stderr, "atlas data: %d chars (capped to %d)\n", atlasData.Len(), maxAtlasData)
 		data := atlasData.String()
 		atlasData.Reset()
-		atlasData.WriteString(limitSections(data, atlasDataLimit))
+		atlasData.WriteString(LimitAtlasData(data, maxAtlasData))
 	}
+	fmt.Fprintf(os.Stderr, "atlas context: %s\n", metrics.FormatText(metrics.Measure(atlasData.String())))
 
 	styleCode := style.LoadReference("", atlasData.String(), a.GraphPath())
 	if styleCode != "" {
@@ -161,7 +184,17 @@ func extractControllers(data string, a atlas.Runner) []ControllerInfo {
 			return
 		}
 		seen[id] = true
-		role := classifyController(a, id)
+		role, provenByData := classifyControllerFromData(data, id)
+		if !provenByData {
+			if _, structured := a.(atlas.JSONRunner); structured {
+				// A structured result without a qualifying edge does not prove a
+				// workload role. Preserve unknown rather than issuing one query
+				// per candidate or inferring from names/files.
+				role = "unknown"
+			} else {
+				role = classifyController(a, id)
+			}
+		}
 		controllers = append(controllers, ControllerInfo{ID: id, File: file, Role: role})
 	}
 	for _, ref := range atlas.EntityRefs(data) {
@@ -176,6 +209,23 @@ func extractControllers(data string, a atlas.Runner) []ControllerInfo {
 		add(m[1], m[2])
 	}
 	return controllers
+}
+
+func classifyControllerFromData(data, controllerID string) (string, bool) {
+	foundRelationship := false
+	for _, relationship := range atlas.RelationshipRefs(data) {
+		if relationship.From != controllerID {
+			continue
+		}
+		foundRelationship = true
+		if relationship.Type == "creates" || relationship.Type == "owns" {
+			return "workload", true
+		}
+	}
+	if foundRelationship {
+		return "unknown", true
+	}
+	return "", false
 }
 
 func rankControllers(controllers []ControllerInfo, terms []string) {

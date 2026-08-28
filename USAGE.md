@@ -44,6 +44,28 @@ the full machine-readable entity payload.
 ./assistant --graph ~/codeatlas/hypershift-graph.json "how many entities are there"
 ```
 
+## Context Benchmark — No LLM
+
+Compare the context sent to a model for full versus compact Atlas retrieval:
+
+```bash
+./assistant --graph ~/codeatlas/hypershift-graph.json \
+  --benchmark controller:example.com/repo/pkg.Reconciler
+```
+
+Add `--repo` to measure the graph-selected source files that form the raw
+repository baseline:
+
+```bash
+./assistant --graph ~/codeatlas/hypershift-graph.json --repo ~/hypershift \
+  --benchmark controller:example.com/repo/pkg.Reconciler --benchmark-json
+```
+
+This runs two deterministic Atlas queries and no Ollama request. It never walks
+the repository: source measurement uses only files named by returned CodeAtlas
+entities. Token values are estimates (`~4` Unicode characters/token), while
+normal Ollama requests report actual prompt/output counts on stderr.
+
 ## Solve Mode — JIRA Issue Analysis
 
 Feed a JIRA description, get root cause analysis + fix approach + file paths.
@@ -258,6 +280,8 @@ Override with a custom conventions file for other projects:
 | `--claude-file` | — | Path to file — generate Claude-optimized prompt |
 | `--output` | auto | Output file for Claude prompt (default: `<input>-claude.xml`) |
 | `--generate` | — | Description of Go code to generate |
+| `--benchmark` | — | Exact CodeAtlas entity; compare full/compact context without an LLM |
+| `--benchmark-json` | false | Emit the benchmark result as JSON; requires `--benchmark` |
 | `--review-file` | — | Path to a local PR review packet |
 | `--review-diff` | — | Build a deterministic CodeAtlas review packet from a diff file or `-` |
 | `--review-base` | — | Base Git ref for `--review-diff` |

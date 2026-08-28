@@ -74,6 +74,23 @@ assistant --graph graph.json "tell me everything about NodePoolReconciler"
 
 Intent is detected from keywords (explain, impact, investigate, search, stats) and mapped to the right atlas command automatically.
 
+### Context Benchmark (no LLM)
+
+Measure the context cost of a graph query before sending it to a model:
+
+```bash
+assistant --graph graph.json --benchmark controller:example.com/repo/pkg.Reconciler
+assistant --graph graph.json --repo ~/your-repo \
+  --benchmark controller:example.com/repo/pkg.Reconciler --benchmark-json
+```
+
+The benchmark performs one full and one compact deterministic Atlas query. With
+`--repo`, it also measures source files explicitly named by the graph; it does
+not walk or rescan the repository and does not invoke Ollama. It reports prompt
+size, approximate token reduction, selected files, and truncation status. The
+approximation is for comparison only; Ollama emits actual token counts during
+generation.
+
 ### Solve Mode
 
 Feed a JIRA description, get root cause analysis + fix approach with actual file paths:
@@ -206,6 +223,8 @@ Supports `solve:`, `claude:`, and `gen:` prefixes inline:
 cmd/assistant/main.go           — CLI entry point, flag parsing, REPL
 internal/
   atlas/atlas.go                — Runner interface + Client for atlas CLI
+  benchmark/benchmark.go        — no-LLM full/compact/raw context measurements
+  metrics/metrics.go            — byte/character/estimated-token measurements
   ollama/ollama.go              — LLM interface + Client for Ollama API
   intent/intent.go              — Intent detection, entity/term extraction
   prompt/prompt.go              — Template-based prompt builders
@@ -233,6 +252,8 @@ internal/
 | `--claude` | | JIRA text — generate Claude-optimized prompt |
 | `--claude-file` | | Path to file — generate Claude-optimized prompt |
 | `--generate` | | Description of Go code to generate |
+| `--benchmark` | | Exact CodeAtlas entity to benchmark; performs no LLM generation |
+| `--benchmark-json` | `false` | Emit the benchmark result as machine-readable JSON |
 | `--review-file` | | Read a local PR review packet and run supplemental review |
 | `--review-diff` | | Build a deterministic CodeAtlas review packet from a diff file or `-` |
 | `--review-base` | | Base Git ref for `--review-diff` |

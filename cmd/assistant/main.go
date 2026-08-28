@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/vsolanki12/codeatlas-assistant/internal/atlas"
+	"github.com/vsolanki12/codeatlas-assistant/internal/benchmark"
 	"github.com/vsolanki12/codeatlas-assistant/internal/claude"
 	"github.com/vsolanki12/codeatlas-assistant/internal/generate"
 	"github.com/vsolanki12/codeatlas-assistant/internal/intent"
@@ -38,6 +40,8 @@ func main() {
 	conventionsFile := flag.String("conventions", "", "conventions file (embedded default if empty)")
 	forceSolve := flag.Bool("force-solve", false, "skip existing fix check in solve mode")
 	distillOnly := flag.Bool("distill-only", false, "generate XML + manifest only, skip solve step")
+	benchmarkEntity := flag.String("benchmark", "", "measure full/compact Atlas context for an entity (no LLM)")
+	benchmarkJSON := flag.Bool("benchmark-json", false, "emit --benchmark result as JSON")
 	flag.Parse()
 	if *numCtx < 8192 {
 		fmt.Fprintln(os.Stderr, "error: --num-ctx must be at least 8192")
@@ -48,6 +52,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	a := &atlas.Client{Path: *graphPath}
+	if *benchmarkEntity != "" {
+		result, err := benchmark.Run(a, *benchmarkEntity, *repoPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "benchmark error: %v\n", err)
+			os.Exit(1)
+		}
+		if *benchmarkJSON {
+			if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+				fmt.Fprintf(os.Stderr, "benchmark output error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Print(result.Format())
+		}
+		return
+	}
+	if *benchmarkJSON {
+		fmt.Fprintln(os.Stderr, "error: --benchmark-json requires --benchmark <entity>")
+		os.Exit(1)
+	}
+
 	heavy := *claudeFile != "" || *solveFile != "" || *solveFlag != "" || *generateFlag != "" || *reviewFile != "" || *reviewDiff != ""
 	resolvedModel, err := resolveModel(*model, heavy)
 	if err != nil {
@@ -55,7 +81,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	a := &atlas.Client{Path: *graphPath}
+	defer func() {
+		if usage := a.LastUsage(); usage.Calls > 0 {
+			fmt.Fprintf(os.Stderr, "Atlas usage: %s\n", usage.Summary())
+		}
+	}()
 	llm := &ollama.Client{Model: resolvedModel, NumCtx: *numCtx, MaxOutput: *maxOutput}
 	conventions := prompt.LoadConventions(*conventionsFile)
 
@@ -179,9 +209,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       assistant --generate \"add a validation function for NodePool\"")
 		fmt.Fprintln(os.Stderr, "       assistant --review-file review-packet.md --graph graph.json")
 		fmt.Fprintln(os.Stderr, "       assistant --review-diff diff.patch --review-base origin/main --repo ~/repo")
+		fmt.Fprintln(os.Stderr, "       assistant --benchmark controller:example.com/repo/pkg.Reconciler --graph graph.json --repo ~/repo")
 		fmt.Fprintln(os.Stderr, "       assistant --interactive")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "flags: --model name, --graph path, --num-ctx N, --max-output N, --conventions file, --review-file packet")
+		fmt.Fprintln(os.Stderr, "flags: --model name, --graph path, --num-ctx N, --max-output N, --conventions file, --review-file packet, --benchmark entity, --benchmark-json")
 		os.Exit(1)
 	}
 

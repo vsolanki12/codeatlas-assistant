@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/vsolanki12/codeatlas-assistant/internal/atlas"
+	"github.com/vsolanki12/codeatlas-assistant/internal/gather"
 	"github.com/vsolanki12/codeatlas-assistant/internal/intent"
+	"github.com/vsolanki12/codeatlas-assistant/internal/metrics"
 	"github.com/vsolanki12/codeatlas-assistant/internal/ollama"
 	"github.com/vsolanki12/codeatlas-assistant/internal/prompt"
 	"github.com/vsolanki12/codeatlas-assistant/internal/style"
@@ -75,19 +77,25 @@ func Run(a atlas.Runner, llm ollama.LLM, description, styleFile, conventions, re
 		return
 	}
 
-	styleCode := style.LoadReference(styleFile, atlasData.String(), a.GraphPath())
+	atlasContext := gather.LimitAtlasData(atlasData.String(), 24000)
+	if atlasContext != atlasData.String() {
+		fmt.Fprintf(os.Stderr, "atlas data: %d chars (capped to %d)\n", len(atlasData.String()), len(atlasContext))
+	}
+	fmt.Fprintf(os.Stderr, "atlas context: %s\n", metrics.FormatText(metrics.Measure(atlasContext)))
+
+	styleCode := style.LoadReference(styleFile, atlasContext, a.GraphPath())
 
 	fmt.Fprintln(os.Stderr, "--- Generating code ---")
 	var p string
 	if repoPath != "" {
-		ws := workingset.Build(repoPath, atlasData.String(), "", "", a)
+		ws := workingset.Build(repoPath, atlasContext, "", "", a)
 		if len(ws.ImplFiles) == 0 {
 			fmt.Fprintln(os.Stderr, "atlas error: no graph-selected implementation source was available; refusing to generate code")
 			return
 		}
-		p = prompt.BuildGenerateWithSources(description, atlasData.String(), styleCode, conventions, toPromptFiles(ws.ImplFiles))
+		p = prompt.BuildGenerateWithSources(description, atlasContext, styleCode, conventions, toPromptFiles(ws.ImplFiles))
 	} else {
-		p = prompt.BuildGenerate(description, atlasData.String(), styleCode, conventions)
+		p = prompt.BuildGenerate(description, atlasContext, styleCode, conventions)
 	}
 
 	output, err := llm.GenerateString(p)

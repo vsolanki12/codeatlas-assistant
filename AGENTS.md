@@ -36,6 +36,8 @@ There is no `Makefile`, CI, or Docker configuration — the project builds with 
 cmd/assistant/main.go           — CLI entry point, flag parsing, model resolution, REPL
 internal/
   atlas/                        — Runner interface + Client for shelling out to atlas CLI
+  benchmark/                    — no-LLM full/compact/raw context measurement
+  metrics/                      — context size and estimated-token measurement helpers
   ollama/                       — LLM interface + Client for Ollama HTTP API (streaming)
   intent/                       — Intent detection + entity/term extraction from questions
   prompt/                       — Template-based prompt builders (embeds templates/*.tmpl)
@@ -68,6 +70,7 @@ User Input → Intent Detection → Entity Extraction → Atlas CLI queries
 | Mode | Flag | Purpose |
 |------|------|---------|
 | Question | (positional args) | Natural-language questions routed by intent (explain, impact, investigate, search, stats) |
+| Benchmark | `--benchmark` | Compare full/compact Atlas context without resolving an Ollama model |
 | Solve | `--solve` / `--solve-file` | JIRA description → root cause + files + approach + tests |
 | Generate | `--generate` | Go code generation with style matching from `--style-file` or auto-detect |
 | Claude | `--claude` / `--claude-file` | Distill atlas data into Claude-ready XML prompt (zero Claude tokens until paste) |

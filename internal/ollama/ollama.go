@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/vsolanki12/codeatlas-assistant/internal/metrics"
 )
 
 type LLM interface {
@@ -21,6 +24,26 @@ type Client struct {
 	Model     string
 	NumCtx    int
 	MaxOutput int
+
+	usageMu sync.RWMutex
+	usage   Usage
+}
+
+// Usage records the last Ollama request. Ollama supplies actual token counts
+// on its terminal streaming chunk; estimates remain available when a mock or
+// older server omits those fields.
+type Usage struct {
+	Prompt       metrics.Text `json:"prompt"`
+	Output       metrics.Text `json:"output"`
+	PromptTokens int          `json:"promptTokens,omitempty"`
+	OutputTokens int          `json:"outputTokens,omitempty"`
+}
+
+// LastUsage returns measurements for the most recent generation request.
+func (c *Client) LastUsage() Usage {
+	c.usageMu.RLock()
+	defer c.usageMu.RUnlock()
+	return c.usage
 }
 
 type Options struct {
@@ -37,8 +60,10 @@ type request struct {
 }
 
 type response struct {
-	Response string `json:"response"`
-	Done     bool   `json:"done"`
+	Response        string `json:"response"`
+	Done            bool   `json:"done"`
+	PromptEvalCount int    `json:"prompt_eval_count"`
+	EvalCount       int    `json:"eval_count"`
 }
 
 type tagsResponse struct {
@@ -103,7 +128,8 @@ func (c *Client) Generate(prompt string) error {
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "prompt size: %d chars\n", len(prompt))
+	fmt.Fprintf(os.Stderr, "prompt size: %s\n", metrics.FormatText(metrics.Measure(prompt)))
+	c.setUsage(prompt, "", 0, 0)
 
 	client := &http.Client{Timeout: 30 * time.Minute}
 	resp, err := client.Post(
@@ -118,18 +144,25 @@ func (c *Client) Generate(prompt string) error {
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+	var output strings.Builder
+	var promptTokens, outputTokens int
 	for scanner.Scan() {
 		var chunk response
 		if err := json.Unmarshal(scanner.Bytes(), &chunk); err != nil {
 			continue
 		}
 		fmt.Fprint(os.Stdout, chunk.Response)
+		output.WriteString(chunk.Response)
 		if chunk.Done {
+			promptTokens = chunk.PromptEvalCount
+			outputTokens = chunk.EvalCount
 			fmt.Println()
 			break
 		}
 	}
 
+	c.setUsage(prompt, output.String(), promptTokens, outputTokens)
+	c.printUsage()
 	return scanner.Err()
 }
 
@@ -146,7 +179,8 @@ func (c *Client) GenerateString(prompt string) (string, error) {
 		return "", err
 	}
 
-	fmt.Fprintf(os.Stderr, "prompt size: %d chars\n", len(prompt))
+	fmt.Fprintf(os.Stderr, "prompt size: %s\n", metrics.FormatText(metrics.Measure(prompt)))
+	c.setUsage(prompt, "", 0, 0)
 
 	client := &http.Client{Timeout: 30 * time.Minute}
 	resp, err := client.Post(
@@ -162,6 +196,7 @@ func (c *Client) GenerateString(prompt string) (string, error) {
 	var result strings.Builder
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+	var promptTokens, outputTokens int
 	for scanner.Scan() {
 		var chunk response
 		if err := json.Unmarshal(scanner.Bytes(), &chunk); err != nil {
@@ -169,12 +204,42 @@ func (c *Client) GenerateString(prompt string) (string, error) {
 		}
 		result.WriteString(chunk.Response)
 		if chunk.Done {
+			promptTokens = chunk.PromptEvalCount
+			outputTokens = chunk.EvalCount
 			break
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
+		c.setUsage(prompt, result.String(), promptTokens, outputTokens)
+		c.printUsage()
 		return "", err
 	}
+	c.setUsage(prompt, result.String(), promptTokens, outputTokens)
+	c.printUsage()
 	return result.String(), nil
+}
+
+func (c *Client) setUsage(prompt, output string, promptTokens, outputTokens int) {
+	c.usageMu.Lock()
+	c.usage = Usage{
+		Prompt:       metrics.Measure(prompt),
+		Output:       metrics.Measure(output),
+		PromptTokens: promptTokens,
+		OutputTokens: outputTokens,
+	}
+	c.usageMu.Unlock()
+}
+
+func (c *Client) printUsage() {
+	usage := c.LastUsage()
+	promptTokens := usage.Prompt.EstimatedTokens
+	outputTokens := usage.Output.EstimatedTokens
+	if usage.PromptTokens > 0 {
+		promptTokens = usage.PromptTokens
+	}
+	if usage.OutputTokens > 0 {
+		outputTokens = usage.OutputTokens
+	}
+	fmt.Fprintf(os.Stderr, "LLM usage: prompt=%d tokens, output=%d tokens\n", promptTokens, outputTokens)
 }

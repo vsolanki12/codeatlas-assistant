@@ -48,7 +48,7 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 	focusedData := atlasData
 	if workload != "" {
 		fmt.Fprintf(os.Stderr, "--- Workload controller: %s ---\n", workload)
-		focused := gatherControllerData(a, workload)
+		focused := gatherControllerData(a, atlasData, workload)
 		if focused != "" {
 			focusedData = focused
 		}
@@ -139,7 +139,12 @@ func toEntries(controllers []gather.ControllerInfo) []prompt.ControllerEntry {
 	return entries
 }
 
-func gatherControllerData(a atlas.Runner, controllerID string) string {
+func gatherControllerData(a atlas.Runner, existingData, controllerID string) string {
+	if containsEntity(existingData, controllerID) {
+		fmt.Fprintln(os.Stderr, "--- Reusing controller context already retrieved from Atlas ---")
+		return existingData
+	}
+
 	var buf strings.Builder
 	buf.WriteString(fmt.Sprintf("### Workload Controller: %s\n", controllerID))
 
@@ -163,6 +168,15 @@ func gatherControllerData(a atlas.Runner, controllerID string) string {
 		return ""
 	}
 	return buf.String()
+}
+
+func containsEntity(data, entityID string) bool {
+	for _, ref := range atlas.EntityRefs(data) {
+		if ref.ID == entityID {
+			return true
+		}
+	}
+	return false
 }
 
 func DefaultOutputName(inputFile string) string {
