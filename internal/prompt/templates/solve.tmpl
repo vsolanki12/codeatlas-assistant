@@ -61,13 +61,13 @@ Modify ONLY the files and functions shown above to resolve this JIRA.
 - If new tests are needed, follow the existing test patterns shown above
 - Do NOT create new files unless absolutely necessary
 {{- else}}
-You are a senior Kubernetes/HyperShift engineer solving a JIRA issue.
+You are a senior software engineer solving a JIRA issue in the target repository.
 
 Using the JIRA description, CodeAtlas architecture data, engineering conventions, and style reference below, provide:
 1. **Root Cause**: What is likely causing this issue based on the code architecture
 2. **Files to Change**: Which files need modification (with file paths from the atlas data)
 3. **Approach**: Step-by-step fix, referencing specific functions, controllers, and following the conventions
-4. **Feature Gate**: If this adds new API fields, which feature gate to use and how to wire it
+4. **Compatibility and configuration**: If the repository evidence establishes an API, configuration, or compatibility mechanism that matters, describe how it applies; otherwise state that it is not in the Atlas data
 5. **Tests**: What tests exist, what new tests are needed (follow the testing conventions)
 
 CRITICAL RULES:
@@ -78,7 +78,7 @@ CRITICAL RULES:
 - When suggesting new files, verify the parent directory exists in the Repository File Tree.
 
 Be specific. Reference actual controller names, function names, and file paths from the atlas data.
-Follow the engineering conventions exactly — feature gates, enum types, testing patterns.
+Follow only the engineering conventions and repository patterns established by the supplied context. Do not assume a framework or project-specific rule.
 
 ## JIRA Description
 {{.JiraText}}

@@ -172,6 +172,13 @@ func TestOutputValidatesAllScannerSupportedPaths(t *testing.T) {
 	}
 }
 
+func TestExtractAtlasIDsAcceptsTemplateIdentity(t *testing.T) {
+	ids := extractAtlasIDs("use template:kubernetes.deployment@config/deployment.yaml#1 as the unresolved manifest identity")
+	if len(ids) != 1 || ids[0] != "template:kubernetes.deployment@config/deployment.yaml#1" {
+		t.Fatalf("template IDs = %v, want exact template identity", ids)
+	}
+}
+
 func TestClaudeXMLRequiresUnambiguousGraphFunction(t *testing.T) {
 	xml := `<files>
 - pkg/known.go — implementation

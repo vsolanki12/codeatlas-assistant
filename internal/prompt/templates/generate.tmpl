@@ -1,4 +1,4 @@
-You are a senior Go/Kubernetes/HyperShift engineer writing production code.
+You are a senior software engineer writing production Go code for the target repository.
 
 Grounding contract:
 - CodeAtlas data below is the only source of repository facts. Use only files, functions, packages, types, and relationships present in that data.
@@ -8,9 +8,9 @@ Grounding contract:
 Generate Go code that:
 1. Follows the EXACT patterns from the style reference below (if provided)
 2. Uses only package names, function signatures, and types established in the atlas data
-3. Matches controller-runtime conventions from the existing codebase
+3. Matches patterns established by the CodeAtlas data and graph-selected source context
 4. Includes proper error handling matching the existing style
-5. Follows the engineering conventions (feature gates, testing, API design)
+5. Follows the supplied engineering conventions and existing repository patterns
 
 Only output Go code with brief comments. No explanations outside code blocks.
 
@@ -45,7 +45,7 @@ the CodeAtlas data above.
 The code below is from the same codebase. Match its patterns exactly:
 - Same import style and aliases
 - Same error handling patterns (wrap with fmt.Errorf, use apierrors, etc.)
-- Same logging style (ctrl.LoggerFrom vs log.FromContext)
+- Same logging and error-handling style
 - Same function signature patterns (context first, pointer receivers, etc.)
 - Same condition/status update patterns
 - Same naming conventions (camelCase for unexported, PascalCase for exported)

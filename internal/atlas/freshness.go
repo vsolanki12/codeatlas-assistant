@@ -13,7 +13,11 @@ type Freshness struct {
 	GraphCommit        string
 	RepoHead           string
 	GraphRepository    string
+	SchemaVersion      string
+	SchemaCurrent      bool
 	EntityIdentity     string
+	ScanCoverage       *ScanCoverage
+	ScanWarnings       []string
 	Stale              bool
 	Incomplete         bool
 	RepositoryMismatch bool
@@ -21,6 +25,22 @@ type Freshness struct {
 	StateVerifiable    bool
 	Verifiable         bool
 	Available          bool
+}
+
+// CurrentSchemaVersion is the graph contract supported by this Assistant.
+// Keeping the version check at the consumer boundary prevents an older graph
+// from silently omitting fields used by routing and validation.
+const CurrentSchemaVersion = "1.5.0"
+
+// ScanCoverage mirrors the small, stable coverage summary emitted by
+// CodeAtlas. The assistant reports it as metadata; it never treats ignored
+// files as parsed facts or turns counts into inferred repository behavior.
+type ScanCoverage struct {
+	Discovered int `json:"discovered"`
+	Parsed     int `json:"parsed"`
+	Reused     int `json:"reused"`
+	Ignored    int `json:"ignored"`
+	Failed     int `json:"failed"`
 }
 
 func (f Freshness) Warning() string {
@@ -39,7 +59,19 @@ func (f Freshness) Warning() string {
 		return "repository files differ from the CodeAtlas graph — results may be outdated"
 	}
 	if f.Incomplete {
+		if f.ScanCoverage != nil && f.ScanCoverage.Failed > 0 {
+			return fmt.Sprintf("graph scan is incomplete — %d discovered file(s) failed to parse; some repository facts may be absent", f.ScanCoverage.Failed)
+		}
 		return "graph scan is incomplete — some repository facts may be absent"
+	}
+	if f.SchemaVersion == "" {
+		return "graph schema version is unavailable — rescan before relying on implementation guidance"
+	}
+	if !f.SchemaCurrent {
+		return fmt.Sprintf("graph schema %s is not current — rescan with CodeAtlas schema %s", f.SchemaVersion, CurrentSchemaVersion)
+	}
+	if f.ScanCoverage != nil && f.ScanCoverage.Ignored > 0 {
+		return fmt.Sprintf("CodeAtlas discovered %d file(s) without a registered parser; those files are not graph evidence", f.ScanCoverage.Ignored)
 	}
 	if f.GraphCommit == "" {
 		return "graph has no commit metadata — freshness cannot be verified"
@@ -98,6 +130,15 @@ func (f Freshness) PromptContext() string {
 	var b strings.Builder
 	b.WriteString("CodeAtlas verification status (metadata, not repository content):\n")
 	fmt.Fprintf(&b, "- graph availability: %s\n", availability)
+	schema := f.SchemaVersion
+	if schema == "" {
+		schema = "legacy or unavailable"
+	}
+	schemaState := "current"
+	if !f.SchemaCurrent {
+		schemaState = "not current"
+	}
+	fmt.Fprintf(&b, "- graph schema: %s (%s)\n", schema, schemaState)
 	fmt.Fprintf(&b, "- graph freshness: %s\n", freshness)
 	fmt.Fprintf(&b, "- repository match: %s\n", repository)
 	fmt.Fprintf(&b, "- scan: %s\n", scan)
@@ -108,6 +149,18 @@ func (f Freshness) PromptContext() string {
 	}
 	if f.RepoHead != "" {
 		fmt.Fprintf(&b, "- repository HEAD: %s\n", short(f.RepoHead))
+	}
+	if f.ScanCoverage != nil {
+		fmt.Fprintf(&b, "- scan coverage: discovered=%d parsed=%d reused=%d ignored=%d failed=%d\n",
+			f.ScanCoverage.Discovered, f.ScanCoverage.Parsed, f.ScanCoverage.Reused,
+			f.ScanCoverage.Ignored, f.ScanCoverage.Failed)
+	}
+	for i, warning := range f.ScanWarnings {
+		if i == 5 {
+			fmt.Fprintf(&b, "- scan warnings: %d additional warning(s) omitted\n", len(f.ScanWarnings)-i)
+			break
+		}
+		fmt.Fprintf(&b, "- scan warning: %s\n", warning)
 	}
 	if warning := f.Warning(); warning != "" {
 		fmt.Fprintf(&b, "- limitation: %s\n", warning)
@@ -121,7 +174,7 @@ func (f Freshness) PromptContext() string {
 // incomplete or unverifiable graph, but generated implementation guidance
 // must have a graph that is both available and tied to the requested checkout.
 func (f Freshness) BlocksImplementation() bool {
-	return !f.Available || f.Stale || f.Incomplete || f.RepositoryMismatch || f.Dirty || !f.Verifiable || !f.StateVerifiable || f.EntityIdentity == ""
+	return !f.Available || f.Stale || f.Incomplete || f.RepositoryMismatch || f.Dirty || !f.Verifiable || !f.StateVerifiable || f.EntityIdentity == "" || f.SchemaVersion == "" || !f.SchemaCurrent
 }
 
 func CheckFreshness(a Runner, repoPath string) Freshness {
@@ -151,7 +204,11 @@ func CheckFreshness(a Runner, repoPath string) Freshness {
 		GraphCommit:     meta.Commit,
 		RepoHead:        head,
 		GraphRepository: meta.Repository,
+		SchemaVersion:   meta.SchemaVersion,
+		SchemaCurrent:   meta.SchemaVersion == CurrentSchemaVersion,
 		EntityIdentity:  meta.EntityIdentity,
+		ScanCoverage:    meta.ScanCoverage,
+		ScanWarnings:    append([]string(nil), meta.ScanWarnings...),
 		Incomplete:      !meta.ScanComplete,
 		Available:       true,
 	}
@@ -170,21 +227,25 @@ func CheckFreshness(a Runner, repoPath string) Freshness {
 }
 
 type freshnessJSON struct {
-	Available       bool     `json:"available"`
-	GraphRepository string   `json:"graphRepository"`
-	Repository      string   `json:"repository"`
-	GraphCommit     string   `json:"graphCommit"`
-	RepoHead        string   `json:"repoHead"`
-	EntityIdentity  string   `json:"entityIdentity"`
-	ScanComplete    bool     `json:"scanComplete"`
-	RepositoryMatch bool     `json:"repositoryMatch"`
-	Verifiable      bool     `json:"verifiable"`
-	Stale           bool     `json:"stale"`
-	Dirty           bool     `json:"dirty"`
-	StateVerifiable bool     `json:"stateVerifiable"`
-	ChangedFiles    []string `json:"changedFiles"`
-	NewFiles        []string `json:"newFiles"`
-	DeletedFiles    []string `json:"deletedFiles"`
+	Available       bool          `json:"available"`
+	SchemaVersion   string        `json:"schemaVersion"`
+	SchemaCurrent   bool          `json:"schemaCurrent"`
+	GraphRepository string        `json:"graphRepository"`
+	Repository      string        `json:"repository"`
+	GraphCommit     string        `json:"graphCommit"`
+	RepoHead        string        `json:"repoHead"`
+	EntityIdentity  string        `json:"entityIdentity"`
+	ScanComplete    bool          `json:"scanComplete"`
+	ScanCoverage    *ScanCoverage `json:"scanCoverage"`
+	ScanWarnings    []string      `json:"scanWarnings"`
+	RepositoryMatch bool          `json:"repositoryMatch"`
+	Verifiable      bool          `json:"verifiable"`
+	Stale           bool          `json:"stale"`
+	Dirty           bool          `json:"dirty"`
+	StateVerifiable bool          `json:"stateVerifiable"`
+	ChangedFiles    []string      `json:"changedFiles"`
+	NewFiles        []string      `json:"newFiles"`
+	DeletedFiles    []string      `json:"deletedFiles"`
 }
 
 func parseFreshness(a JSONRunner, repoPath string) (Freshness, bool) {
@@ -207,7 +268,11 @@ func parseFreshness(a JSONRunner, repoPath string) (Freshness, bool) {
 		GraphCommit:        value.GraphCommit,
 		RepoHead:           value.RepoHead,
 		GraphRepository:    value.GraphRepository,
+		SchemaVersion:      value.SchemaVersion,
+		SchemaCurrent:      value.SchemaCurrent || value.SchemaVersion == CurrentSchemaVersion,
 		EntityIdentity:     value.EntityIdentity,
+		ScanCoverage:       value.ScanCoverage,
+		ScanWarnings:       append([]string(nil), value.ScanWarnings...),
 		Stale:              value.Stale,
 		Incomplete:         !value.ScanComplete,
 		RepositoryMismatch: !value.RepositoryMatch,
@@ -248,11 +313,14 @@ func comparableRepoPath(path string) string {
 }
 
 type graphMetadata struct {
-	Repository     string `json:"repository"`
-	Commit         string `json:"commit"`
-	EntityIdentity string `json:"entityIdentity"`
-	ScanComplete   bool   `json:"scanComplete"`
-	Available      bool   `json:"-"`
+	Repository     string        `json:"repository"`
+	Commit         string        `json:"commit"`
+	SchemaVersion  string        `json:"schemaVersion"`
+	EntityIdentity string        `json:"entityIdentity"`
+	ScanComplete   bool          `json:"scanComplete"`
+	ScanCoverage   *ScanCoverage `json:"scanCoverage"`
+	ScanWarnings   []string      `json:"scanWarnings"`
+	Available      bool          `json:"-"`
 }
 
 func parseGraphMetadata(a Runner) graphMetadata {
@@ -272,12 +340,22 @@ func parseGraphMetadata(a Runner) graphMetadata {
 	var meta graphMetadata
 	for _, line := range strings.Split(out, "\n") {
 		switch {
+		case strings.HasPrefix(line, "schema: codeatlas/"):
+			meta.SchemaVersion = strings.TrimPrefix(line, "schema: codeatlas/")
 		case strings.HasPrefix(line, "repository: "):
 			meta.Repository = strings.TrimPrefix(line, "repository: ")
 		case strings.HasPrefix(line, "commit: "):
 			meta.Commit = strings.TrimPrefix(line, "commit: ")
 		case strings.HasPrefix(line, "entity identity: "):
 			meta.EntityIdentity = strings.TrimPrefix(line, "entity identity: ")
+		case strings.HasPrefix(line, "scan coverage: "):
+			var coverage ScanCoverage
+			if _, err := fmt.Sscanf(strings.TrimPrefix(line, "scan coverage: "), "discovered=%d parsed=%d reused=%d ignored=%d failed=%d",
+				&coverage.Discovered, &coverage.Parsed, &coverage.Reused, &coverage.Ignored, &coverage.Failed); err == nil {
+				meta.ScanCoverage = &coverage
+			}
+		case strings.HasPrefix(line, "scan warning: "):
+			meta.ScanWarnings = append(meta.ScanWarnings, strings.TrimPrefix(line, "scan warning: "))
 		case strings.TrimSpace(line) == "scan: complete":
 			meta.ScanComplete = true
 		}

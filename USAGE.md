@@ -7,7 +7,21 @@ cd ~/codeatlas-assistant
 go build -o assistant ./cmd/assistant/
 ```
 
-Requires `atlas` on PATH: `cd ~/codeatlas && go install ./cmd/atlas`
+Requires `atlas` on PATH: `cd ~/codeatlas && go install ./cmd/atlas`. If multiple
+Atlas versions are installed, use `--atlas-bin /absolute/path/to/atlas` or set
+`CODEATLAS_BIN` so the assistant and graph schema stay in sync.
+
+Before implementation or review, verify the graph against the checkout:
+
+```bash
+atlas verify --graph ~/codeatlas/hypershift-graph.json --repo ~/hypershift
+```
+
+This checks the current schema, repository identity, commit/file state, and
+complete scan coverage. Ignored files are reported but are not fatal unless
+`--fail-on-ignored` is supplied. High-degree entity relationships can be
+continued through CodeAtlas's `relationship_offset`/`relationship_limit`
+parameters when using the CLI or MCP directly.
 
 ## Single-Shot Queries
 
@@ -141,8 +155,10 @@ No Claude tokens consumed until you paste the output. Everything runs locally vi
 The assistant reads only graph-selected source files and function spans for the
 working set; it does not scan the repository, discover API types, or build a
 second architecture model. With `--repo`, implementation workflows also stop
-when CodeAtlas cannot identify exactly one safe controller; use a narrower
-request or exact entity ID rather than relying on ranking.
+when CodeAtlas identifies multiple possible implementation controllers; use a
+narrower request or exact entity ID rather than relying on ranking. A generic
+Go repository with no controller entities can use graph-selected functions
+directly.
 
 ```bash
 ./assistant --graph ~/codeatlas/hypershift-graph.json --claude-file jira.txt --repo ~/hypershift
@@ -254,11 +270,11 @@ CodeAtlas Assistant (type 'exit' to quit)
 
 ## Conventions File
 
-The tool embeds a `conventions.md` with HyperShift domain knowledge (feature gates, API design,
-8 control plane components, testing patterns, directory structure). This is injected into solve
-and generate prompts automatically.
+The tool embeds repository-neutral engineering conventions. This is injected
+into solve, generate, Claude, and review prompts without claiming any
+project-specific framework or directory structure.
 
-Override with a custom conventions file for other projects:
+Override with a project conventions file when the repository has local rules:
 
 ```bash
 ./assistant --conventions ~/my-project/conventions.md --graph graph.json --solve "bug description"

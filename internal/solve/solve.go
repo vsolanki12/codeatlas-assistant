@@ -45,10 +45,14 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions string, forceSolv
 
 	var p string
 	if repoPath != "" {
-		selected, unique := gather.SelectImplementationController(result.Controllers)
-		if !unique {
-			fmt.Fprintln(os.Stderr, "atlas error: CodeAtlas did not identify exactly one implementation controller; provide a more specific request or exact CodeAtlas entity ID")
-			return
+		selected := gather.ControllerInfo{}
+		if len(result.Controllers) > 0 {
+			var unique bool
+			selected, unique = gather.SelectImplementationController(result.Controllers)
+			if !unique {
+				fmt.Fprintln(os.Stderr, "atlas error: CodeAtlas identified multiple implementation controllers; provide a more specific request or exact CodeAtlas entity ID")
+				return
+			}
 		}
 		workload := selected.ID
 		workloadFile := selected.File
@@ -115,7 +119,10 @@ func checkExistingFix(jiraText, repoRoot string) bool {
 			fmt.Printf("## Existing fix found for %s\n\n", id)
 			fmt.Printf("Git commits referencing this JIRA:\n```\n%s\n```\n\n", lines)
 
-			cmd = exec.Command("gh", "pr", "list", "--repo=openshift/hypershift", "--search="+id, "--state=merged", "--limit=5", "--json=number,title,mergedAt,url")
+			// Run from the target checkout so gh resolves the repository from its
+			// configured remote. The assistant must not assume a particular
+			// organization or project when checking for an existing fix.
+			cmd = exec.Command("gh", "pr", "list", "--search="+id, "--state=merged", "--limit=5", "--json=number,title,mergedAt,url")
 			cmd.Dir = repoRoot
 			prOut, prErr := cmd.Output()
 			if prErr == nil && len(prOut) > 3 {

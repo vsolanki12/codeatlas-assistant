@@ -39,6 +39,14 @@ func TestIsAmbiguous(t *testing.T) {
 	}
 }
 
+func TestEntityRefsAcceptTemplateEntities(t *testing.T) {
+	data := `{"entities":[{"id":"template:kubernetes.deployment@config/deployment.yaml#1","name":"Deployment template","kind":"template","source":{"file":"config/deployment.yaml","line":1}}]}`
+	refs := EntityRefs(data)
+	if len(refs) != 1 || refs[0].ID != "template:kubernetes.deployment@config/deployment.yaml#1" {
+		t.Fatalf("EntityRefs() = %+v, want template entity", refs)
+	}
+}
+
 func TestClientUsageAccumulatesDeterministically(t *testing.T) {
 	c := &Client{}
 	c.recordUsage("search", "abcd")

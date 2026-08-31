@@ -3,6 +3,7 @@ package atlas
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -25,7 +26,11 @@ type JSONRunner interface {
 }
 
 type Client struct {
+	// Path is the graph passed to every Atlas command.
 	Path string
+	// Binary optionally selects the Atlas executable. When empty, CODEATLAS_BIN
+	// is used, then the "atlas" executable resolved through PATH.
+	Binary string
 
 	usageMu sync.RWMutex
 	usage   Usage
@@ -88,7 +93,7 @@ func (c *Client) run(args []string, jsonOutput bool) (string, error) {
 		fullArgs = append(fullArgs, "--json")
 	}
 
-	cmd := exec.Command("atlas", fullArgs...)
+	cmd := exec.Command(c.binaryPath(), fullArgs...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -105,6 +110,16 @@ func (c *Client) run(args []string, jsonOutput bool) (string, error) {
 	}
 
 	return output, nil
+}
+
+func (c *Client) binaryPath() string {
+	if strings.TrimSpace(c.Binary) != "" {
+		return c.Binary
+	}
+	if binary := strings.TrimSpace(os.Getenv("CODEATLAS_BIN")); binary != "" {
+		return binary
+	}
+	return "atlas"
 }
 
 func (c *Client) recordUsage(command, output string) {

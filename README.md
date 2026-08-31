@@ -36,13 +36,33 @@ For read-only questions, any incomplete or unverified graph status is included
 in the model prompt so the answer reports that limit instead of hiding it in
 the CLI warning stream.
 
+The embedded conventions are repository-neutral. Supply `--conventions` for
+project-specific rules; the assistant does not assume HyperShift, Kubernetes,
+or a particular framework from its defaults.
+
+Freshness context also carries CodeAtlas scan coverage. Failed parser files
+block implementation workflows; ignored file types are reported as outside
+the graph rather than treated as absent repository entities.
+
+For a preflight check in automation, run CodeAtlas's strict verification command
+against the same checkout and graph:
+
+```bash
+atlas verify --graph graph.json --repo ~/your-repo
+```
+
+The assistant also rejects missing or non-current CodeAtlas schema metadata for
+implementation and review workflows. Read-only questions can still expose the
+status in their prompt so the model reports uncertainty instead of treating a
+partial graph as complete.
+
 This keeps the assistant from becoming a second repository-analysis engine:
 Atlas extracts and retrieves facts; the model explains them, identifies
 uncertainty, and proposes engineering reasoning for a human to review.
 
 ## Prerequisites
 
-- [CodeAtlas](https://github.com/vsolanki12/codeatlas) CLI installed (`go install github.com/vsolanki12/codeatlas/cmd/atlas@latest`)
+- [CodeAtlas](https://github.com/vsolanki12/codeatlas) CLI installed (`go install github.com/vsolanki12/codeatlas/cmd/atlas@latest`); keep `atlas` on `PATH` or pass `--atlas-bin /path/to/atlas` (the `CODEATLAS_BIN` environment variable is also supported)
 - [Ollama](https://ollama.ai) running locally with at least one model (`ollama pull qwen3:8b`)
 - A scanned atlas graph (`atlas scan --output graph.json ~/your-repo`)
 
@@ -135,8 +155,10 @@ For implementation-oriented modes, pass `--repo` pointing to the same checkout
 used to build the graph. The Assistant then reads only the files and source
 spans selected by CodeAtlas; it does not walk the repository or perform a
 second architecture scan. If CodeAtlas cannot identify exactly one safe
-implementation controller, solve and Claude implementation workflows stop and
-ask for a narrower question or exact entity ID instead of choosing by rank.
+implementation controller when controller candidates are present, solve and
+Claude implementation workflows stop and ask for a narrower question or exact
+entity ID instead of choosing by rank. Function-oriented Go repositories with
+no controller entities can still use graph-selected functions and files.
 
 ### Supplemental PR Review Mode
 
@@ -259,7 +281,7 @@ internal/
 | `--review-base` | | Base Git ref for `--review-diff` |
 | `--review-head` | `HEAD` | Head Git ref for `--review-diff` |
 | `--style-file` | auto-detect | Go file to use as style reference |
-| `--conventions` | embedded | Custom conventions file |
+| `--conventions` | generic embedded defaults | Custom project conventions file |
 | `--force-solve` | `false` | Skip existing fix check in solve mode |
 
 ## License

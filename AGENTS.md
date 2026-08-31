@@ -12,7 +12,7 @@ This file is intentionally minimal — detailed guidance lives in the referenced
 |-------|---------------|
 | **Product overview and install** | [README.md](README.md) |
 | **Detailed usage examples and flags** | [USAGE.md](USAGE.md) |
-| **Domain conventions (injected into prompts)** | [conventions.md](conventions.md) |
+| **Prompt conventions (generic defaults / project override)** | [conventions.md](conventions.md) |
 | **Repo/binary/graph freshness checks** | [.claude/skills/check-repos/SKILL.md](.claude/skills/check-repos/SKILL.md) |
 
 ## Development Workflow
@@ -26,9 +26,9 @@ There is no `Makefile`, CI, or Docker configuration — the project builds with 
 
 ### Prerequisites
 
-- [CodeAtlas](https://github.com/vsolanki12/codeatlas) CLI (`atlas`) on `PATH`
+- [CodeAtlas](https://github.com/vsolanki12/codeatlas) CLI (`atlas`) on `PATH`, or pass `--atlas-bin /path/to/atlas` / set `CODEATLAS_BIN`
 - [Ollama](https://ollama.ai) running locally with at least one model
-- A pre-scanned Atlas graph (`atlas scan -repo /path/to/repo -output graph.json`)
+- A pre-scanned Atlas graph (`atlas scan -repo /path/to/repo -output graph.json`); verify it with `atlas verify` before implementation or review work
 
 ## Code Architecture
 
@@ -89,7 +89,7 @@ User Input → Intent Detection → Entity Extraction → Atlas CLI queries
 
 ## Conventions and Domain Knowledge
 
-The `conventions.md` file contains HyperShift-specific engineering conventions (feature gates, API design, components, testing patterns, directory structure). This file is embedded into prompts for solve, generate, and claude modes. Override with `--conventions` for other projects.
+The embedded prompt defaults are repository-neutral. The root `conventions.md` is an optional project-specific example; pass `--conventions /path/to/project-conventions.md` when a repository has local rules. Never treat the default prompt conventions as evidence about a target repository.
 
 ## Companion Project
 

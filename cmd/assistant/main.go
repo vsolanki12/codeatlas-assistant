@@ -22,6 +22,7 @@ import (
 func main() {
 	model := flag.String("model", "", "ollama model name (auto-detect if empty)")
 	graphPath := flag.String("graph", "atlas.json", "path to atlas graph JSON")
+	atlasBinary := flag.String("atlas-bin", "", "CodeAtlas executable (default: CODEATLAS_BIN or atlas on PATH)")
 	numCtx := flag.Int("num-ctx", 24576, "ollama context size")
 	maxOutput := flag.Int("max-output", 1800, "maximum generated tokens")
 	interactive := flag.Bool("interactive", false, "interactive REPL mode")
@@ -52,7 +53,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	a := &atlas.Client{Path: *graphPath}
+	a := &atlas.Client{Path: *graphPath, Binary: *atlasBinary}
 	if *benchmarkEntity != "" {
 		result, err := benchmark.Run(a, *benchmarkEntity, *repoPath)
 		if err != nil {
@@ -95,7 +96,7 @@ func main() {
 			os.Exit(1)
 		}
 		freshness := atlas.CheckFreshness(a, *repoPath)
-		if !freshness.Available || freshness.Stale || freshness.RepositoryMismatch || freshness.Dirty || freshness.Incomplete || freshness.GraphCommit == "" || freshness.EntityIdentity == "" || !freshness.Verifiable || !freshness.StateVerifiable {
+		if freshness.BlocksImplementation() {
 			fmt.Fprintf(os.Stderr, "atlas error: %s\n", freshness.Warning())
 			return
 		}
@@ -204,7 +205,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt")
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude")
 		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude --output prompt.xml")
-		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude --repo ~/hypershift")
+		fmt.Fprintln(os.Stderr, "       assistant --solve-file jira.txt --claude --repo ~/repo")
 		fmt.Fprintln(os.Stderr, "       assistant --claude-file jira.txt")
 		fmt.Fprintln(os.Stderr, "       assistant --generate \"add a validation function for NodePool\"")
 		fmt.Fprintln(os.Stderr, "       assistant --review-file review-packet.md --graph graph.json")
@@ -212,7 +213,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       assistant --benchmark controller:example.com/repo/pkg.Reconciler --graph graph.json --repo ~/repo")
 		fmt.Fprintln(os.Stderr, "       assistant --interactive")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "flags: --model name, --graph path, --num-ctx N, --max-output N, --conventions file, --review-file packet, --benchmark entity, --benchmark-json")
+		fmt.Fprintln(os.Stderr, "flags: --model name, --graph path, --atlas-bin path, --num-ctx N, --max-output N, --conventions file, --review-file packet, --benchmark entity, --benchmark-json")
 		os.Exit(1)
 	}
 

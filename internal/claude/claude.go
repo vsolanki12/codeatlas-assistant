@@ -53,8 +53,8 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions, outputFile, repo
 			focusedData = focused
 		}
 	}
-	if repoPath != "" && !uniqueController {
-		fmt.Fprintln(os.Stderr, "atlas error: CodeAtlas did not identify exactly one implementation controller; provide a more specific request or exact CodeAtlas entity ID")
+	if repoPath != "" && len(result.Controllers) > 0 && !uniqueController {
+		fmt.Fprintln(os.Stderr, "atlas error: CodeAtlas identified multiple implementation controllers; provide a more specific request or exact CodeAtlas entity ID")
 		return
 	}
 

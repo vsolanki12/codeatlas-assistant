@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/vsolanki12/codeatlas-assistant/internal/atlas"
@@ -43,7 +44,7 @@ func (r Result) Report() string {
 // invent a YAML manifest or Markdown design document while still passing the
 // output gate.
 var repositoryPathPattern = regexp.MustCompile(`(?:^|\s|[-|:])([a-zA-Z0-9_./-]+\.(?:go|ya?ml|md))\b`)
-var atlasIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document|resource|operator):[a-zA-Z0-9._/@+\-]+`)
+var atlasIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document|resource|template|operator):[a-zA-Z0-9._/@+\-#]+`)
 
 // Output validates LLM output by checking file path references against the
 // CodeAtlas graph. A filesystem check is only a fallback when no graph runner
@@ -142,15 +143,8 @@ func decodeAtlasEntities(out string) ([]atlasEntityRef, bool) {
 func atlasPathExists(a atlas.Runner, path string) bool {
 	path = filepath.ToSlash(filepath.Clean(path))
 	if jr, ok := a.(atlas.JSONRunner); ok {
-		if out, err := jr.RunJSON("where", path, "--compact"); err == nil {
-			if entities, ok := decodeAtlasEntities(out); ok {
-				for _, entity := range entities {
-					if entity.Source.File == path || contains(entity.Files, path) {
-						return true
-					}
-				}
-				return false
-			}
+		if atlasPageContainsPath(jr, path, false) {
+			return true
 		}
 	}
 	out, err := a.Run("where", path)
@@ -164,20 +158,55 @@ func atlasTestPathExists(a atlas.Runner, path string) bool {
 		// Text output does not expose a stable kind/source contract.
 		return false
 	}
-	out, err := jr.RunJSON("where", path, "--compact")
-	if err != nil {
-		return false
+	return atlasPageContainsPath(jr, path, true)
+}
+
+// atlasPageContainsPath walks the bounded where result until the graph says
+// there are no more matches. A single fixed-page lookup could incorrectly
+// reject a valid model reference in a high-entity file.
+func atlasPageContainsPath(jr atlas.JSONRunner, path string, testsOnly bool) bool {
+	const pageLimit = 100
+	offset := 0
+	for {
+		out, err := jr.RunJSON("where", path, "--compact", "--offset", strconv.Itoa(offset), "--limit", strconv.Itoa(pageLimit))
+		if err != nil {
+			return false
+		}
+		page, ok := decodeAtlasEntityPage(out)
+		if !ok {
+			return false
+		}
+		for _, entity := range page.Entities {
+			if testsOnly && entity.Kind != "test" {
+				continue
+			}
+			if entity.Source.File == path || contains(entity.Files, path) {
+				return true
+			}
+		}
+		if !page.Truncated || page.NextOffset <= offset {
+			return false
+		}
+		offset = page.NextOffset
+	}
+}
+
+type atlasEntityPage struct {
+	Entities   []atlasEntityRef `json:"entities"`
+	NextOffset int              `json:"nextOffset"`
+	Truncated  bool             `json:"truncated"`
+}
+
+func decodeAtlasEntityPage(out string) (atlasEntityPage, bool) {
+	var page atlasEntityPage
+	if err := json.Unmarshal([]byte(out), &page); err == nil && page.Entities != nil {
+		return page, true
 	}
 	entities, ok := decodeAtlasEntities(out)
 	if !ok {
-		return false
+		return atlasEntityPage{}, false
 	}
-	for _, entity := range entities {
-		if entity.Kind == "test" && (entity.Source.File == path || contains(entity.Files, path)) {
-			return true
-		}
-	}
-	return false
+	return atlasEntityPage{Entities: entities}, true
 }
 
 func atlasEntityExists(a atlas.Runner, id string) bool {

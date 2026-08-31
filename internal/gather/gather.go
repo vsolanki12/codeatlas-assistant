@@ -13,7 +13,7 @@ import (
 	"github.com/vsolanki12/codeatlas-assistant/internal/style"
 )
 
-var entityIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document|resource):[a-zA-Z0-9._/@+\-]+`)
+var entityIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document|resource|template):[a-zA-Z0-9._/@+\-#]+`)
 var crdIDPattern = regexp.MustCompile(`crd:[a-zA-Z0-9._/@+\-]+`)
 var controllerWithPathPattern = regexp.MustCompile(`(controller:[a-zA-Z0-9._/@+\-]+)\s*\|\s*([^\s|]+)`)
 var jsonControllerPattern = regexp.MustCompile(`(?s)"id"\s*:\s*"(controller:[^"]+)".{0,700}?"source"\s*:\s*\{.*?"file"\s*:\s*"([^"]+)"`)
