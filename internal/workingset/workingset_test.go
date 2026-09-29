@@ -272,6 +272,58 @@ func TestBuildForControllerKeepsOnlyEvidencedCallTargets(t *testing.T) {
 	}
 }
 
+func TestBuildForControllerIncludesContainedImplementationMethods(t *testing.T) {
+	repo := t.TempDir()
+	for name, code := range map[string]string{
+		"controllers/setup.go":     "package controllers\n\nfunc (r *Reconciler) SetupWithManager() {}\n",
+		"controllers/reconcile.go": "package controllers\n\nfunc (r *Reconciler) Reconcile() {\n\thandle()\n}\n",
+		"controllers/unrelated.go": "package controllers\n\nfunc Unrelated() { panic(\"should not be selected\") }\n",
+	} {
+		path := filepath.Join(repo, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(code), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	controllerID := "controller:example.com/repo/controllers.Reconciler"
+	reconcileID := "function:example.com/repo/controllers.Reconciler.Reconcile"
+	setupID := "function:example.com/repo/controllers.Reconciler.SetupWithManager"
+	atlasData := fmt.Sprintf(`{"entities":[
+{"id":%q,"name":"Reconciler","kind":"controller","source":{"file":"controllers/setup.go","line":3}},
+{"id":%q,"name":"Reconcile","kind":"function","source":{"file":"controllers/reconcile.go","line":3,"endLine":5}},
+{"id":%q,"name":"SetupWithManager","kind":"function","source":{"file":"controllers/setup.go","line":3,"endLine":3}},
+{"id":"function:example.com/repo/controllers.Unrelated","name":"Unrelated","kind":"function","source":{"file":"controllers/unrelated.go","line":3,"endLine":3}}],
+"relationships":[
+{"id":%q,"from":%q,"to":%q,"type":"contains","confidence":"proven","evidence":{"file":"controllers/reconcile.go","line":3,"reason":"controller Reconcile method"}},
+{"id":%q,"from":%q,"to":%q,"type":"contains","confidence":"proven","evidence":{"file":"controllers/setup.go","line":3,"reason":"controller setup method"}}]}`,
+		controllerID,
+		reconcileID,
+		setupID,
+		controllerID+"--contains--"+reconcileID, controllerID, reconcileID,
+		controllerID+"--contains--"+setupID, controllerID, setupID,
+	)
+
+	ws := BuildForController(repo, atlasData, "", controllerID, "controllers/setup.go")
+	if len(ws.Functions) != 2 || ws.Functions[0] != reconcileID || ws.Functions[1] != setupID {
+		t.Fatalf("working set omitted contained controller methods: %v", ws.Functions)
+	}
+	joined := ""
+	for _, file := range ws.ImplFiles {
+		joined += file.Path + "\n" + file.Code + "\n"
+	}
+	for _, want := range []string{"controllers/reconcile.go → Reconcile()", "handle()", "controllers/setup.go → SetupWithManager()"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("working set missing contained implementation method %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "should not be selected") || strings.Contains(joined, "Unrelated()") {
+		t.Fatalf("working set included unrelated sibling function:\n%s", joined)
+	}
+}
+
 func TestFindTestsReusesExistingGraphTestRelationship(t *testing.T) {
 	repo := t.TempDir()
 	testPath := filepath.Join(repo, "controllers", "reconcile_test.go")
@@ -285,14 +337,39 @@ func TestFindTestsReusesExistingGraphTestRelationship(t *testing.T) {
 	controllerID := "controller:example.com/repo/controllers.Reconciler"
 	functionID := "function:example.com/repo/controllers.Reconcile"
 	testID := "test:example.com/repo/controllers.TestReconcile"
-	atlasData := fmt.Sprintf(`{"entities":[{"id":%q,"kind":"controller","source":{"file":"controllers/reconcile.go"}},{"id":%q,"kind":"function","source":{"file":"controllers/reconcile.go"}},{"id":%q,"kind":"test","source":{"file":"controllers/reconcile_test.go"}}],"relationships":[{"id":"%s--verifies--%s","from":%q,"to":%q,"type":"verifies","confidence":"proven","evidence":{"file":"controllers/reconcile_test.go","line":3}}]}`,
+	atlasData := fmt.Sprintf(`{"entities":[{"id":%q,"kind":"controller","source":{"file":"controllers/reconcile.go"}},{"id":%q,"kind":"function","source":{"file":"controllers/reconcile.go"}},{"id":%q,"kind":"test","source":{"file":"controllers/reconcile_test.go"}}],"relationships":[{"id":"%s--tested_by--%s","from":%q,"to":%q,"type":"tested_by","confidence":"inferred","evidence":{"parser":"go-ast","file":"controllers/reconcile_test.go","line":3,"reason":"test body directly invokes function; invocation does not prove assertions or behavior coverage"}}]}`,
 		controllerID, functionID, testID, functionID, testID, functionID, testID)
 	runner := &graphTestRunner{}
 	files := findTestsFromGraph(runner, repo, controllerID, []string{functionID}, atlasData)
 	if len(files) != 1 || files[0].Path != "controllers/reconcile_test.go" {
 		t.Fatalf("unexpected graph-selected test files: %+v", files)
 	}
+	for _, want := range []string{"tested_by (inferred)", "controllers/reconcile_test.go:3", "does not prove assertions or behavior coverage"} {
+		if !strings.Contains(files[0].Evidence, want) {
+			t.Errorf("test relationship evidence missing %q: %s", want, files[0].Evidence)
+		}
+	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("existing test relationship caused redundant Atlas calls: %v", runner.calls)
+	}
+}
+
+func TestAppendGraphTestPathsRequiresSelectedFunctionAndEvidence(t *testing.T) {
+	functionID := "function:example.com/repo/controllers.Reconcile"
+	unrelatedID := "function:example.com/repo/controllers.Other"
+	testID := "test:example.com/repo/controllers.TestReconcile"
+	data := fmt.Sprintf(`{"entities":[{"id":%q,"kind":"function"},{"id":%q,"kind":"function"},{"id":%q,"kind":"test","source":{"file":"controllers/reconcile_test.go"}}],"relationships":[
+{"id":"%s--verifies--%s","from":%q,"to":%q,"type":"verifies","confidence":"proven","evidence":{"file":"controllers/reconcile_test.go","line":3,"reason":"not a supported test link"}},
+{"id":"%s--tested_by--%s","from":%q,"to":%q,"type":"tested_by","confidence":"inferred","evidence":{"file":"controllers/reconcile_test.go","line":3,"reason":"belongs to another function"}},
+{"id":"%s--tested_by--%s","from":%q,"to":%q,"type":"tested_by","confidence":"inferred","evidence":{"file":"controllers/reconcile_test.go","line":0,"reason":"missing source location"}}]}`,
+		functionID, unrelatedID, testID,
+		functionID, testID, functionID, testID,
+		unrelatedID, testID, unrelatedID, testID,
+		functionID, testID, functionID, testID)
+	var paths []string
+	evidenceByPath := make(map[string][]string)
+	appendGraphTestPaths(data, []string{functionID}, make(map[string]bool), &paths, evidenceByPath)
+	if len(paths) != 0 || len(evidenceByPath) != 0 {
+		t.Fatalf("unsupported or ungrounded links selected a test: paths=%v evidence=%v", paths, evidenceByPath)
 	}
 }

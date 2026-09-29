@@ -19,8 +19,9 @@ type AskData struct {
 }
 
 type FileContent struct {
-	Path string
-	Code string
+	Path     string
+	Code     string
+	Evidence string
 }
 
 type SolveData struct {

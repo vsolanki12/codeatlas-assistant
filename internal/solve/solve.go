@@ -91,7 +91,7 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions string, forceSolv
 func toPromptFiles(files []workingset.FileContent) []prompt.FileContent {
 	out := make([]prompt.FileContent, len(files))
 	for i, f := range files {
-		out[i] = prompt.FileContent{Path: f.Path, Code: f.Code}
+		out[i] = prompt.FileContent{Path: f.Path, Code: f.Code, Evidence: f.Evidence}
 	}
 	return out
 }

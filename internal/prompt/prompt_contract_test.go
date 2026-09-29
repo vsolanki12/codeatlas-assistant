@@ -12,7 +12,11 @@ func TestSolveWorkingSet_ContractStrings(t *testing.T) {
 		"controller:TestController",
 		[]string{"Reconcile"},
 		[]FileContent{{Path: "pkg/a.go", Code: "package a"}},
-		[]FileContent{{Path: "pkg/a_test.go", Code: "package a"}},
+		[]FileContent{{
+			Path:     "pkg/a_test.go",
+			Code:     "package a",
+			Evidence: "- `function:pkg.A` --tested_by (inferred)--> `test:pkg.TestA`; evidence `pkg/a_test.go:12` — direct invocation",
+		}},
 		"type Foo struct{}",
 	)
 
@@ -21,11 +25,29 @@ func TestSolveWorkingSet_ContractStrings(t *testing.T) {
 		"MUST NOT invent",
 		"MUST NOT choose another file",
 		"ONLY the files and functions shown above",
+		"CodeAtlas test relationship evidence",
+		"tested_by (inferred)",
+		"does not prove assertions, behavioral coverage, or branch execution",
 	}
 	for _, s := range required {
 		if !strings.Contains(output, s) {
 			t.Errorf("working-set solve prompt missing required constraint: %q", s)
 		}
+	}
+}
+
+func TestSolveWorkingSetLabelsTestWithoutRelationshipAsCandidate(t *testing.T) {
+	output := BuildWorkingSetSolve(
+		"test jira",
+		"",
+		"controller:TestController",
+		[]string{"function:pkg.A"},
+		[]FileContent{{Path: "pkg/a.go", Code: "package a"}},
+		[]FileContent{{Path: "pkg/a_test.go", Code: "package a"}},
+		"",
+	)
+	if !strings.Contains(output, "No explicit CodeAtlas function-to-test relationship was provided") || !strings.Contains(output, "Treat it as a candidate, not proof") {
+		t.Fatalf("test file without graph evidence was not labeled as a candidate:\n%s", output)
 	}
 }
 

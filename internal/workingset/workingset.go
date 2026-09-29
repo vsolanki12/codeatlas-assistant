@@ -12,8 +12,9 @@ import (
 )
 
 type FileContent struct {
-	Path string
-	Code string
+	Path     string
+	Code     string
+	Evidence string
 }
 
 type WorkingSet struct {
@@ -91,7 +92,7 @@ func (ws *WorkingSet) TotalChars() int {
 		total += len(f.Code)
 	}
 	for _, f := range ws.TestFiles {
-		total += len(f.Code)
+		total += len(f.Code) + len(f.Evidence)
 	}
 	return total
 }
@@ -167,7 +168,7 @@ func extractFunctionIDsForController(atlasData, controllerID string) []string {
 	seen := make(map[string]bool)
 	var ids []string
 	for _, relationship := range atlas.RelationshipRefs(atlasData) {
-		if relationship.From != controllerID || relationship.Type != "calls" || !strings.HasPrefix(relationship.To, "function:") {
+		if !isControllerFunctionRelationship(relationship, controllerID) {
 			continue
 		}
 		if !seen[relationship.To] {
@@ -177,6 +178,12 @@ func extractFunctionIDsForController(atlasData, controllerID string) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+func isControllerFunctionRelationship(relationship atlas.RelationshipRef, controllerID string) bool {
+	return relationship.From == controllerID &&
+		strings.HasPrefix(relationship.To, "function:") &&
+		(relationship.Type == "calls" || relationship.Type == "contains")
 }
 
 func extractControllerIDForFile(atlasData, controllerFile string) string {
@@ -229,7 +236,7 @@ func appendGraphSelectedSources(ws *WorkingSet, repoPath string, refs []atlas.En
 	if selectedControllerID != "" {
 		allowed[selectedControllerID] = true
 		for _, relationship := range relationships {
-			if relationship.From == selectedControllerID && relationship.Type == "calls" && strings.HasPrefix(relationship.To, "function:") {
+			if isControllerFunctionRelationship(relationship, selectedControllerID) {
 				allowed[relationship.To] = true
 			}
 		}
@@ -400,6 +407,8 @@ var testPathPattern = regexp.MustCompile(`(\S+_test\.go)(?::\d+)?`)
 
 func findTestsFromGraph(a atlas.Runner, repoPath string, controllerID string, functionIDs []string, atlasData string) []FileContent {
 	seen := make(map[string]bool)
+	seenPaths := make(map[string]bool)
+	evidenceByPath := make(map[string][]string)
 	var testPaths []string
 	structured := false
 	if _, structured = a.(atlas.JSONRunner); structured {
@@ -407,7 +416,7 @@ func findTestsFromGraph(a atlas.Runner, repoPath string, controllerID string, fu
 	}
 
 	if structured {
-		appendGraphTestPaths(atlasData, controllerID, functionIDs, seen, &testPaths)
+		appendGraphTestPaths(atlasData, functionIDs, seenPaths, &testPaths, evidenceByPath)
 	}
 
 	if len(testPaths) == 0 {
@@ -420,7 +429,7 @@ func findTestsFromGraph(a atlas.Runner, repoPath string, controllerID string, fu
 		}
 		if err == nil {
 			if structured {
-				appendGraphTestPaths(out, controllerID, functionIDs, seen, &testPaths)
+				appendGraphTestPaths(out, functionIDs, seenPaths, &testPaths, evidenceByPath)
 			} else {
 				appendTestPaths(out, structured, seen, &testPaths)
 			}
@@ -437,7 +446,7 @@ func findTestsFromGraph(a atlas.Runner, repoPath string, controllerID string, fu
 				continue
 			}
 			if structured {
-				appendGraphTestPaths(out, "", []string{fn}, seen, &testPaths)
+				appendGraphTestPaths(out, []string{fn}, seenPaths, &testPaths, evidenceByPath)
 			} else {
 				appendTestPaths(out, structured, seen, &testPaths)
 			}
@@ -455,18 +464,17 @@ func findTestsFromGraph(a atlas.Runner, repoPath string, controllerID string, fu
 		}
 		code := readFileCapped(fullPath, 200)
 		if code != "" {
-			files = append(files, FileContent{Path: p, Code: code})
+			files = append(files, FileContent{Path: p, Code: code, Evidence: strings.Join(evidenceByPath[p], "\n")})
 		}
 	}
 	return files
 }
 
-// appendGraphTestPaths reuses only test entities connected by an explicit
-// graph relationship to the selected controller or one of its evidenced call
-// targets. A test merely appearing in a broad search result is not treated as
-// related behavior.
-func appendGraphTestPaths(data, controllerID string, functionIDs []string, seen map[string]bool, paths *[]string) {
-	allowed := map[string]bool{controllerID: true}
+// appendGraphTestPaths reuses only test entities connected to a selected
+// function by an explicit tested_by relationship with confidence and source
+// evidence. A graph link is not treated as proof of behavior coverage.
+func appendGraphTestPaths(data string, functionIDs []string, seenPaths map[string]bool, paths *[]string, evidenceByPath map[string][]string) {
+	allowed := make(map[string]bool, len(functionIDs))
 	for _, functionID := range functionIDs {
 		allowed[functionID] = true
 	}
@@ -475,21 +483,33 @@ func appendGraphTestPaths(data, controllerID string, functionIDs []string, seen 
 		refs[ref.ID] = ref
 	}
 	for _, relationship := range atlas.RelationshipRefs(data) {
-		candidate := ""
-		if allowed[relationship.From] {
-			candidate = relationship.To
-		} else if allowed[relationship.To] {
-			candidate = relationship.From
-		}
-		if !strings.HasPrefix(candidate, "test:") || seen[candidate] {
+		if relationship.Type != "tested_by" || !allowed[relationship.From] || !strings.HasPrefix(relationship.To, "test:") {
 			continue
 		}
-		ref, ok := refs[candidate]
+		if (relationship.Confidence != "proven" && relationship.Confidence != "inferred") || relationship.Evidence.File == "" || relationship.Evidence.Line <= 0 || relationship.Evidence.Reason == "" {
+			continue
+		}
+		ref, ok := refs[relationship.To]
 		if !ok || !strings.HasSuffix(ref.Source.File, "_test.go") {
 			continue
 		}
-		seen[candidate] = true
-		*paths = append(*paths, ref.Source.File)
+		if !seenPaths[ref.Source.File] {
+			seenPaths[ref.Source.File] = true
+			*paths = append(*paths, ref.Source.File)
+		}
+		line := fmt.Sprintf("- `%s` --tested_by (%s)--> `%s`; evidence `%s:%d` — %s",
+			relationship.From, relationship.Confidence, relationship.To,
+			relationship.Evidence.File, relationship.Evidence.Line, relationship.Evidence.Reason)
+		duplicate := false
+		for _, existing := range evidenceByPath[ref.Source.File] {
+			if existing == line {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			evidenceByPath[ref.Source.File] = append(evidenceByPath[ref.Source.File], line)
+		}
 	}
 }
 
@@ -545,6 +565,7 @@ func limitWorkingSet(ws *WorkingSet, maxChars int) {
 		ws.ImplFiles[i].Code = limitText(ws.ImplFiles[i].Code, &remaining)
 	}
 	for i := range ws.TestFiles {
+		ws.TestFiles[i].Evidence = limitText(ws.TestFiles[i].Evidence, &remaining)
 		ws.TestFiles[i].Code = limitText(ws.TestFiles[i].Code, &remaining)
 	}
 }

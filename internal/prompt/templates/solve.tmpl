@@ -43,6 +43,15 @@ Exact CodeAtlas function IDs to modify: {{.Functions}}
 {{- range .TestFiles}}
 
 ### Tests: {{.Path}}
+{{- if .Evidence}}
+
+CodeAtlas test relationship evidence:
+{{.Evidence}}
+This graph link shows an invocation or naming association only. It does not prove assertions, behavioral coverage, or branch execution; inspect the test body before drawing conclusions.
+{{- else}}
+
+No explicit CodeAtlas function-to-test relationship was provided for this file. Treat it as a candidate, not proof that it tests the changed behavior.
+{{- end}}
 ```go
 {{.Code}}
 ```
