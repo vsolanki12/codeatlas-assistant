@@ -96,7 +96,7 @@ func Run(a atlas.Runner, entity, repoPath string) (Result, error) {
 // Format returns a concise human-facing report suitable for a terminal.
 func (r Result) Format() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "CodeAtlas context benchmark\nentity: %s\nintent: %s\nAtlas calls: %d\n", r.Entity, r.Intent, r.AtlasCalls)
+	fmt.Fprintf(&b, "CodeAtlas payload-size diagnostic (does not measure answer correctness or end-to-end savings)\nentity: %s\nintent: %s\nAtlas calls: %d\n", r.Entity, r.Intent, r.AtlasCalls)
 	if r.RawRepository != nil {
 		fmt.Fprintf(&b, "raw repository context: %s\n", metrics.FormatText(*r.RawRepository))
 	}

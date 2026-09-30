@@ -10,27 +10,29 @@ import (
 )
 
 type Freshness struct {
-	GraphCommit        string
-	RepoHead           string
-	GraphRepository    string
-	SchemaVersion      string
-	SchemaCurrent      bool
-	EntityIdentity     string
-	ScanCoverage       *ScanCoverage
-	ScanWarnings       []string
-	Stale              bool
-	Incomplete         bool
-	RepositoryMismatch bool
-	Dirty              bool
-	StateVerifiable    bool
-	Verifiable         bool
-	Available          bool
+	GraphCommit         string
+	RepoHead            string
+	GraphRepository     string
+	SchemaVersion       string
+	SchemaCurrent       bool
+	ExtractorCurrent    bool
+	ExtractionSignature string
+	EntityIdentity      string
+	ScanCoverage        *ScanCoverage
+	ScanWarnings        []string
+	Stale               bool
+	Incomplete          bool
+	RepositoryMismatch  bool
+	Dirty               bool
+	StateVerifiable     bool
+	Verifiable          bool
+	Available           bool
 }
 
 // CurrentSchemaVersion is the graph contract supported by this Assistant.
 // Keeping the version check at the consumer boundary prevents an older graph
 // from silently omitting fields used by routing and validation.
-const CurrentSchemaVersion = "1.5.0"
+const CurrentSchemaVersion = "1.6.0"
 
 // ScanCoverage mirrors the small, stable coverage summary emitted by
 // CodeAtlas. The assistant reports it as metadata; it never treats ignored
@@ -69,6 +71,9 @@ func (f Freshness) Warning() string {
 	}
 	if !f.SchemaCurrent {
 		return fmt.Sprintf("graph schema %s is not current — rescan with CodeAtlas schema %s", f.SchemaVersion, CurrentSchemaVersion)
+	}
+	if !f.ExtractorCurrent || f.ExtractionSignature == "" {
+		return "graph extractor provenance is missing or incompatible — perform a full scan with the current CodeAtlas extractor"
 	}
 	if f.ScanCoverage != nil && f.ScanCoverage.Ignored > 0 {
 		return fmt.Sprintf("CodeAtlas discovered %d file(s) without a registered parser; those files are not graph evidence", f.ScanCoverage.Ignored)
@@ -174,7 +179,7 @@ func (f Freshness) PromptContext() string {
 // incomplete or unverifiable graph, but generated implementation guidance
 // must have a graph that is both available and tied to the requested checkout.
 func (f Freshness) BlocksImplementation() bool {
-	return !f.Available || f.Stale || f.Incomplete || f.RepositoryMismatch || f.Dirty || !f.Verifiable || !f.StateVerifiable || f.EntityIdentity == "" || f.SchemaVersion == "" || !f.SchemaCurrent
+	return !f.Available || f.Stale || f.Incomplete || f.RepositoryMismatch || f.Dirty || !f.Verifiable || !f.StateVerifiable || f.EntityIdentity == "" || f.SchemaVersion == "" || !f.SchemaCurrent || !f.ExtractorCurrent || f.ExtractionSignature == ""
 }
 
 func CheckFreshness(a Runner, repoPath string) Freshness {
@@ -227,25 +232,27 @@ func CheckFreshness(a Runner, repoPath string) Freshness {
 }
 
 type freshnessJSON struct {
-	Available       bool          `json:"available"`
-	SchemaVersion   string        `json:"schemaVersion"`
-	SchemaCurrent   bool          `json:"schemaCurrent"`
-	GraphRepository string        `json:"graphRepository"`
-	Repository      string        `json:"repository"`
-	GraphCommit     string        `json:"graphCommit"`
-	RepoHead        string        `json:"repoHead"`
-	EntityIdentity  string        `json:"entityIdentity"`
-	ScanComplete    bool          `json:"scanComplete"`
-	ScanCoverage    *ScanCoverage `json:"scanCoverage"`
-	ScanWarnings    []string      `json:"scanWarnings"`
-	RepositoryMatch bool          `json:"repositoryMatch"`
-	Verifiable      bool          `json:"verifiable"`
-	Stale           bool          `json:"stale"`
-	Dirty           bool          `json:"dirty"`
-	StateVerifiable bool          `json:"stateVerifiable"`
-	ChangedFiles    []string      `json:"changedFiles"`
-	NewFiles        []string      `json:"newFiles"`
-	DeletedFiles    []string      `json:"deletedFiles"`
+	Available           bool          `json:"available"`
+	SchemaVersion       string        `json:"schemaVersion"`
+	SchemaCurrent       bool          `json:"schemaCurrent"`
+	ExtractorCurrent    bool          `json:"extractorCurrent"`
+	ExtractionSignature string        `json:"extractionSignature"`
+	GraphRepository     string        `json:"graphRepository"`
+	Repository          string        `json:"repository"`
+	GraphCommit         string        `json:"graphCommit"`
+	RepoHead            string        `json:"repoHead"`
+	EntityIdentity      string        `json:"entityIdentity"`
+	ScanComplete        bool          `json:"scanComplete"`
+	ScanCoverage        *ScanCoverage `json:"scanCoverage"`
+	ScanWarnings        []string      `json:"scanWarnings"`
+	RepositoryMatch     bool          `json:"repositoryMatch"`
+	Verifiable          bool          `json:"verifiable"`
+	Stale               bool          `json:"stale"`
+	Dirty               bool          `json:"dirty"`
+	StateVerifiable     bool          `json:"stateVerifiable"`
+	ChangedFiles        []string      `json:"changedFiles"`
+	NewFiles            []string      `json:"newFiles"`
+	DeletedFiles        []string      `json:"deletedFiles"`
 }
 
 func parseFreshness(a JSONRunner, repoPath string) (Freshness, bool) {
@@ -265,21 +272,23 @@ func parseFreshness(a JSONRunner, repoPath string) (Freshness, bool) {
 		return Freshness{}, false
 	}
 	return Freshness{
-		GraphCommit:        value.GraphCommit,
-		RepoHead:           value.RepoHead,
-		GraphRepository:    value.GraphRepository,
-		SchemaVersion:      value.SchemaVersion,
-		SchemaCurrent:      value.SchemaCurrent || value.SchemaVersion == CurrentSchemaVersion,
-		EntityIdentity:     value.EntityIdentity,
-		ScanCoverage:       value.ScanCoverage,
-		ScanWarnings:       append([]string(nil), value.ScanWarnings...),
-		Stale:              value.Stale,
-		Incomplete:         !value.ScanComplete,
-		RepositoryMismatch: !value.RepositoryMatch,
-		Dirty:              value.Dirty,
-		StateVerifiable:    value.StateVerifiable,
-		Verifiable:         value.Verifiable,
-		Available:          value.Available,
+		GraphCommit:         value.GraphCommit,
+		RepoHead:            value.RepoHead,
+		GraphRepository:     value.GraphRepository,
+		SchemaVersion:       value.SchemaVersion,
+		SchemaCurrent:       value.SchemaVersion == CurrentSchemaVersion,
+		ExtractorCurrent:    value.ExtractorCurrent,
+		ExtractionSignature: value.ExtractionSignature,
+		EntityIdentity:      value.EntityIdentity,
+		ScanCoverage:        value.ScanCoverage,
+		ScanWarnings:        append([]string(nil), value.ScanWarnings...),
+		Stale:               value.Stale,
+		Incomplete:          !value.ScanComplete,
+		RepositoryMismatch:  !value.RepositoryMatch,
+		Dirty:               value.Dirty,
+		StateVerifiable:     value.StateVerifiable,
+		Verifiable:          value.Verifiable,
+		Available:           value.Available,
 	}, true
 }
 

@@ -41,35 +41,23 @@ func Run(a atlas.Runner, llm ollama.LLM, jiraText, conventions string, forceSolv
 		return
 	}
 
+	atlasData = result.Packet.PromptEvidence()
+
 	fmt.Fprintln(os.Stderr, "--- Generating solution ---")
 
-	var p string
-	if repoPath != "" {
-		selected := gather.ControllerInfo{}
-		if len(result.Controllers) > 0 {
-			var unique bool
-			selected, unique = gather.SelectImplementationController(result.Controllers)
-			if !unique {
-				fmt.Fprintln(os.Stderr, "atlas error: CodeAtlas identified multiple implementation controllers; provide a more specific request or exact CodeAtlas entity ID")
-				return
-			}
-		}
-		workload := selected.ID
-		workloadFile := selected.File
-
-		ws := workingset.BuildForController(repoPath, atlasData, "", workload, workloadFile, a)
-		fmt.Fprintf(os.Stderr, "--- Working set: %d files, %d chars ---\n",
-			len(ws.ImplFiles)+len(ws.TestFiles), ws.TotalChars())
-		if len(ws.ImplFiles) == 0 {
-			fmt.Fprintln(os.Stderr, "atlas error: no graph-selected implementation source was available; refusing to generate a solution")
-			return
-		}
-
-		implFiles := toPromptFiles(ws.ImplFiles)
-		testFiles := toPromptFiles(ws.TestFiles)
-		p = prompt.BuildWorkingSetSolve(jiraText, conventions, workload, ws.Functions, implFiles, testFiles, ws.Types)
-	} else {
-		p = prompt.BuildSolve(jiraText, atlasData, conventions, result.StyleCode, "", "")
+	ws, err := workingset.FromEvidence(repoPath, result.Packet, atlas.SourceBudget(a))
+	if err != nil || len(ws.ImplFiles) == 0 {
+		fmt.Fprintf(os.Stderr, "atlas error: implementation evidence is unavailable: %v\n", err)
+		return
+	}
+	controller := ""
+	if len(result.Controllers) == 1 {
+		controller = result.Controllers[0].ID
+	}
+	p := prompt.BuildWorkingSetSolve(jiraText, conventions, controller, ws.Functions, toPromptFiles(ws.ImplFiles), toPromptFiles(ws.TestFiles), ws.Types)
+	p += "\n\n## Atlas selection evidence\n" + atlasData
+	for _, omission := range ws.Omissions {
+		p += "\nSource limitation: " + omission
 	}
 
 	output, err := llm.GenerateString(p)

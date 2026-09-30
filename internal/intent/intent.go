@@ -80,6 +80,9 @@ var intentWords = map[string]bool{
 }
 
 func ExtractEntity(question string) string {
+	if id := ExactEntityID(question); id != "" {
+		return id
+	}
 	for _, pat := range technicalPatterns {
 		if m := pat.FindString(question); m != "" {
 			return strings.Trim(m, "?!.,;:'\"")
@@ -183,3 +186,16 @@ func ExtractTechnicalTerms(text string) []string {
 
 	return terms
 }
+
+// ExactEntityID preserves a complete repository-qualified ID when the input
+// contains exactly one. Natural-language concept and scope stay in the full
+// question sent to Atlas, rather than being collapsed into this identifier.
+func ExactEntityID(text string) string {
+	ids := entityIDPattern.FindAllString(text, -1)
+	if len(ids) == 1 {
+		return strings.TrimRight(ids[0], ".,;?!")
+	}
+	return ""
+}
+
+var entityIDPattern = regexp.MustCompile(`(?:controller|function|field|crd|package|test|document|resource|template|operator):[a-zA-Z0-9._/@+\-#]+`)

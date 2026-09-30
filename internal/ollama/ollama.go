@@ -233,13 +233,8 @@ func (c *Client) setUsage(prompt, output string, promptTokens, outputTokens int)
 
 func (c *Client) printUsage() {
 	usage := c.LastUsage()
-	promptTokens := usage.Prompt.EstimatedTokens
-	outputTokens := usage.Output.EstimatedTokens
-	if usage.PromptTokens > 0 {
-		promptTokens = usage.PromptTokens
+	fmt.Fprintf(os.Stderr, "LLM token estimates: prompt=%d, output=%d\n", usage.Prompt.EstimatedTokens, usage.Output.EstimatedTokens)
+	if usage.PromptTokens > 0 || usage.OutputTokens > 0 {
+		fmt.Fprintf(os.Stderr, "Ollama reported token counts: prompt=%d, output=%d\n", usage.PromptTokens, usage.OutputTokens)
 	}
-	if usage.OutputTokens > 0 {
-		outputTokens = usage.OutputTokens
-	}
-	fmt.Fprintf(os.Stderr, "LLM usage: prompt=%d tokens, output=%d tokens\n", promptTokens, outputTokens)
 }

@@ -43,8 +43,8 @@ func (r Result) Report() string {
 // CodeAtlas scanner. Restricting validation to Go files would allow a model to
 // invent a YAML manifest or Markdown design document while still passing the
 // output gate.
-var repositoryPathPattern = regexp.MustCompile(`(?:^|\s|[-|:])([a-zA-Z0-9_./-]+\.(?:go|ya?ml|md))\b`)
-var atlasIDPattern = regexp.MustCompile(`(?:controller|function|crd|package|test|document|resource|template|operator):[a-zA-Z0-9._/@+\-#]+`)
+var repositoryPathPattern = regexp.MustCompile(`(?:^|[\s|:\x60"'(\[-])([a-zA-Z0-9_./-]+\.(?:go|ya?ml|md))\b`)
+var atlasIDPattern = regexp.MustCompile(`(?:controller|function|field|crd|package|test|document|resource|template|operator):[a-zA-Z0-9._/@+\-#]+`)
 
 // Output validates LLM output by checking file path references against the
 // CodeAtlas graph. A filesystem check is only a fallback when no graph runner
@@ -143,9 +143,7 @@ func decodeAtlasEntities(out string) ([]atlasEntityRef, bool) {
 func atlasPathExists(a atlas.Runner, path string) bool {
 	path = filepath.ToSlash(filepath.Clean(path))
 	if jr, ok := a.(atlas.JSONRunner); ok {
-		if atlasPageContainsPath(jr, path, false) {
-			return true
-		}
+		return atlasPageContainsPath(jr, path, false)
 	}
 	out, err := a.Run("where", path)
 	return err == nil && !strings.Contains(out, "0 entities") && !strings.Contains(out, "No matching") && strings.TrimSpace(out) != ""

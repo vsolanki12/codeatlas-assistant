@@ -1,0 +1,176 @@
+[
+  {
+    "id": "autorepair-pascalcase",
+    "question": "How does AutoRepair work for NodePool?",
+    "scope": "nodepool",
+    "intent": "understand",
+    "requiredSources": [
+      {
+        "file": "api/hypershift/v1beta1/nodepool_types.go",
+        "role": "definition",
+        "line": 541,
+        "endLine": 548
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi.go",
+        "role": "implementation",
+        "line": 170
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi.go",
+        "role": "implementation",
+        "line": 726,
+        "endLine": 827
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi_test.go",
+        "role": "test",
+        "line": 1316
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi_test.go",
+        "role": "test",
+        "line": 1543
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi_test.go",
+        "role": "test",
+        "line": 1940,
+        "endLine": 1944
+      }
+    ],
+    "requiredSnippets": [
+      {
+        "contains": "reconcileMachineHealthCheck"
+      },
+      {
+        "contains": "TestCAPIReconcile"
+      },
+      {
+        "contains": "AutoRepair: true"
+      }
+    ]
+  },
+  {
+    "id": "autorepair-camelcase",
+    "question": "How does autoRepair work for NodePool?",
+    "scope": "nodepool",
+    "intent": "understand",
+    "requiredSources": [
+      {
+        "file": "api/hypershift/v1beta1/nodepool_types.go",
+        "role": "definition",
+        "line": 541,
+        "endLine": 548
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi.go",
+        "role": "implementation",
+        "line": 170
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi.go",
+        "role": "implementation",
+        "line": 726,
+        "endLine": 827
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi_test.go",
+        "role": "test",
+        "line": 1316
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi_test.go",
+        "role": "test",
+        "line": 1543
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi_test.go",
+        "role": "test",
+        "line": 1940,
+        "endLine": 1944
+      }
+    ],
+    "requiredSnippets": [
+      {
+        "contains": "reconcileMachineHealthCheck"
+      },
+      {
+        "contains": "TestCAPIReconcile"
+      },
+      {
+        "contains": "AutoRepair: true"
+      }
+    ]
+  },
+  {
+    "id": "autorepair-full-id",
+    "question": "How does autoRepair work for NodePool?",
+    "entity": "function:github.com/openshift/hypershift/hypershift-operator/controllers/nodepool.CAPI.Reconcile",
+    "intent": "understand",
+    "requiredSources": [
+      {
+        "file": "api/hypershift/v1beta1/nodepool_types.go",
+        "role": "definition",
+        "line": 541,
+        "endLine": 548
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi.go",
+        "role": "implementation",
+        "line": 170
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi.go",
+        "role": "implementation",
+        "line": 726,
+        "endLine": 827
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi_test.go",
+        "role": "test",
+        "line": 1316
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi_test.go",
+        "role": "test",
+        "line": 1543
+      },
+      {
+        "file": "hypershift-operator/controllers/nodepool/capi_test.go",
+        "role": "test",
+        "line": 1940,
+        "endLine": 1944
+      }
+    ],
+    "requiredSnippets": [
+      {
+        "contains": "reconcileMachineHealthCheck"
+      },
+      {
+        "contains": "TestCAPIReconcile"
+      },
+      {
+        "contains": "AutoRepair: true"
+      }
+    ]
+  },
+  {
+    "id": "nonexistent-concept",
+    "question": "How does ZzAtlasNonexistentConcept987654321 work?",
+    "expectedStatus": "no_match"
+  },
+  {
+    "id": "ambiguous-method-name",
+    "question": "How does Reconcile work?",
+    "entity": "Reconcile",
+    "scope": "nodepool",
+    "expectedStatus": "ambiguous"
+  },
+  {
+    "id": "nonexistent-exact-id",
+    "question": "How does AutoRepair work?",
+    "entity": "function:github.com/openshift/hypershift/hypershift-operator/controllers/nodepool.ZzMissingImplementation",
+    "expectedStatus": "no_match"
+  }
+]

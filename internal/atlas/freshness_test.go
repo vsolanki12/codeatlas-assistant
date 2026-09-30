@@ -29,9 +29,9 @@ func (m *jsonMockRunner) RunJSON(args ...string) (string, error) {
 }
 
 func TestParseGraphMetadata_JSON(t *testing.T) {
-	r := &jsonMockRunner{json: `{"repository":"/repo","commit":"abc","schemaVersion":"1.5.0","scanComplete":true,"scanWarnings":["yaml: broken.yaml: parse error"],"scanCoverage":{"discovered":4,"parsed":3,"ignored":1}}`}
+	r := &jsonMockRunner{json: `{"repository":"/repo","commit":"abc","schemaVersion":"1.6.0","scanComplete":true,"scanWarnings":["yaml: broken.yaml: parse error"],"scanCoverage":{"discovered":4,"parsed":3,"ignored":1}}`}
 	meta := parseGraphMetadata(r)
-	if !meta.Available || meta.Repository != "/repo" || meta.Commit != "abc" || meta.SchemaVersion != "1.5.0" || !meta.ScanComplete {
+	if !meta.Available || meta.Repository != "/repo" || meta.Commit != "abc" || meta.SchemaVersion != "1.6.0" || !meta.ScanComplete {
 		t.Fatalf("unexpected metadata: %+v", meta)
 	}
 	if meta.ScanCoverage == nil || meta.ScanCoverage.Discovered != 4 || meta.ScanCoverage.Ignored != 1 {
@@ -75,15 +75,17 @@ func TestFreshnessWarning_Stale(t *testing.T) {
 
 func TestFreshnessWarning_Fresh(t *testing.T) {
 	f := Freshness{
-		GraphCommit:     "abc123",
-		RepoHead:        "abc123",
-		SchemaVersion:   CurrentSchemaVersion,
-		SchemaCurrent:   true,
-		Stale:           false,
-		Available:       true,
-		Verifiable:      true,
-		StateVerifiable: true,
-		EntityIdentity:  "repository-path-v1",
+		GraphCommit:         "abc123",
+		RepoHead:            "abc123",
+		SchemaVersion:       CurrentSchemaVersion,
+		SchemaCurrent:       true,
+		ExtractorCurrent:    true,
+		ExtractionSignature: "fixture",
+		Stale:               false,
+		Available:           true,
+		Verifiable:          true,
+		StateVerifiable:     true,
+		EntityIdentity:      "repository-path-v1",
 	}
 	if f.Warning() != "" {
 		t.Error("expected no warning for fresh graph")
@@ -92,15 +94,17 @@ func TestFreshnessWarning_Fresh(t *testing.T) {
 
 func TestFreshnessWarning_ReportsIgnoredCoverage(t *testing.T) {
 	f := Freshness{
-		GraphCommit:     "abc123",
-		RepoHead:        "abc123",
-		SchemaVersion:   CurrentSchemaVersion,
-		SchemaCurrent:   true,
-		Available:       true,
-		Verifiable:      true,
-		StateVerifiable: true,
-		EntityIdentity:  "repository-path-v1",
-		ScanCoverage:    &ScanCoverage{Discovered: 5, Parsed: 4, Ignored: 1},
+		GraphCommit:         "abc123",
+		RepoHead:            "abc123",
+		SchemaVersion:       CurrentSchemaVersion,
+		SchemaCurrent:       true,
+		ExtractorCurrent:    true,
+		ExtractionSignature: "fixture",
+		Available:           true,
+		Verifiable:          true,
+		StateVerifiable:     true,
+		EntityIdentity:      "repository-path-v1",
+		ScanCoverage:        &ScanCoverage{Discovered: 5, Parsed: 4, Ignored: 1},
 	}
 	if warning := f.Warning(); !strings.Contains(warning, "without a registered parser") {
 		t.Fatalf("warning = %q, want ignored-file limitation", warning)
@@ -151,7 +155,7 @@ func TestFreshnessPromptContextIncludesVerificationLimits(t *testing.T) {
 }
 
 func TestParseFreshnessIncludesCoverage(t *testing.T) {
-	r := &jsonMockRunner{json: `{"available":true,"graphRepository":"/repo","repository":"/repo","graphCommit":"abc","repoHead":"abc","schemaVersion":"1.5.0","schemaCurrent":true,"entityIdentity":"repository-path-v1","scanComplete":true,"scanWarnings":["yaml: warning"],"repositoryMatch":true,"verifiable":true,"stale":false,"dirty":false,"stateVerifiable":true,"scanCoverage":{"discovered":8,"parsed":7,"reused":1}}`}
+	r := &jsonMockRunner{json: `{"available":true,"graphRepository":"/repo","repository":"/repo","graphCommit":"abc","repoHead":"abc","schemaVersion":"1.6.0","schemaCurrent":true,"extractorCurrent":true,"extractionSignature":"fixture","entityIdentity":"repository-path-v1","scanComplete":true,"scanWarnings":["yaml: warning"],"repositoryMatch":true,"verifiable":true,"stale":false,"dirty":false,"stateVerifiable":true,"scanCoverage":{"discovered":8,"parsed":7,"reused":1}}`}
 	f, ok := parseFreshness(r, "/repo")
 	if !ok || f.SchemaVersion != CurrentSchemaVersion || !f.SchemaCurrent || f.ScanCoverage == nil || f.ScanCoverage.Discovered != 8 || f.ScanCoverage.Reused != 1 || len(f.ScanWarnings) != 1 {
 		t.Fatalf("freshness = %+v, ok=%v", f, ok)

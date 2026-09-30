@@ -1,5 +1,23 @@
 # CodeAtlas Assistant
 
+For coordinated setup, scoped evidence retrieval, provenance checks, and
+measurement limits, see the upstream [shared evidence workflow](https://github.com/vsolanki12/codeatlas/blob/main/docs/evidence-workflow.md).
+Question, solve, generate, and Claude modes consume the version 1.0 Atlas
+evidence manifest. Rebuild Atlas and rescan repositories with schema 1.6.0
+before using these modes. Missing or incompatible evidence blocks model calls.
+
+Use `--benchmark-fixtures benchmarks/hypershift-autorepair.json --repo /path/to/hypershift`
+to check required implementation, API, and test evidence under several packet
+budgets without invoking a model. Fixture requirements are revision-specific.
+Required snippets must occur in retained source code; headings and omission
+messages cannot satisfy them. Sweep manifest and source budgets together.
+
+Control model context with `--evidence-budget-bytes` (default 16384) and
+`--source-budget-bytes` (default 24000). Atlas selects one shared manifest;
+Assistant materializes its spans and renders exact entity identities and
+relationship proofs once. Smaller budgets can omit required evidence; inspect
+reported omissions or run task fixtures before relying on a reduction.
+
 A CLI tool that lets you talk to your codebase in plain English using local LLMs.
 
 ## What Is This?
@@ -9,9 +27,9 @@ A CLI tool that lets you talk to your codebase in plain English using local LLMs
 **CodeAtlas Assistant** sits on top of that. You ask a question in natural language, and it:
 
 1. **Detects your intent** — are you asking how something works? what would break if you changed it? looking for a function?
-2. **Runs bounded, structured Atlas queries** — primarily one compact compound JSON query plus only the follow-up data needed for the intent
-3. **Feeds the graph evidence to a local Ollama model** — your question + compact Atlas data as context
-4. **Streams the answer** — no cloud APIs, everything runs locally
+2. **Retrieves a shared evidence manifest** — the complete question, scope, and exact ID guide deterministic Atlas selection
+3. **Materializes selected source** — merges overlapping excerpts and reserves definitions, implementation, and tests within a separate budget
+4. **Calls a local Ollama model and validates its references** — the answer is printed after validation succeeds
 
 It also has specialized modes for **analyzing JIRA issues** (paste a bug description, get root cause analysis with actual file paths), **generating Go code** that matches your existing codebase patterns, and running a bounded supplemental PR review.
 
@@ -28,13 +46,11 @@ Atlas is the repository-facts layer; the local model is a reasoning layer. The
 assistant prefers compact `--json` Atlas responses, carries relationship
 evidence and graph status into prompts, and tells the model that inferred,
 heuristic, truncated, or unavailable data is not proof. Search and read-only
-questions can report partial graphs, but solve, generate, and Claude prompt
-generation require a current, complete, verifiable graph when a repository is
-provided. When `--repo` is supplied, generated file and function references
-are checked against the graph before they are accepted.
-For read-only questions, any incomplete or unverified graph status is included
-in the model prompt so the answer reports that limit instead of hiding it in
-the CLI warning stream.
+questions with source excerpts, solve, generate, and Claude prompt generation
+require a current, complete, verifiable graph. If `--repo` is omitted, the graph's
+repository checkout is used. Generated file and function references are
+checked before output is printed. Missing, ambiguous, incompatible, or unusable
+evidence is reported before model discovery or invocation.
 
 The embedded conventions are repository-neutral. Supply `--conventions` for
 project-specific rules; the assistant does not assume HyperShift, Kubernetes,
@@ -52,9 +68,8 @@ atlas verify --graph graph.json --repo ~/your-repo
 ```
 
 The assistant also rejects missing or non-current CodeAtlas schema metadata for
-implementation and review workflows. Read-only questions can still expose the
-status in their prompt so the model reports uncertainty instead of treating a
-partial graph as complete.
+implementation and review workflows. A complete parser scan can still have
+partial type resolution; the evidence prompt preserves those extraction limits.
 
 This keeps the assistant from becoming a second repository-analysis engine:
 Atlas extracts and retrieves facts; the model explains them, identifies

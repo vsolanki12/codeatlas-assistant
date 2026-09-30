@@ -3,12 +3,9 @@ package generate
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/vsolanki12/codeatlas-assistant/internal/atlas"
 	"github.com/vsolanki12/codeatlas-assistant/internal/gather"
-	"github.com/vsolanki12/codeatlas-assistant/internal/intent"
-	"github.com/vsolanki12/codeatlas-assistant/internal/metrics"
 	"github.com/vsolanki12/codeatlas-assistant/internal/ollama"
 	"github.com/vsolanki12/codeatlas-assistant/internal/prompt"
 	"github.com/vsolanki12/codeatlas-assistant/internal/style"
@@ -24,78 +21,24 @@ func Run(a atlas.Runner, llm ollama.LLM, description, styleFile, conventions, re
 		fmt.Fprintf(os.Stderr, "--- WARNING: %s ---\n", warning)
 	}
 
-	fmt.Fprintln(os.Stderr, "--- Extracting context ---")
-	terms := intent.ExtractTechnicalTerms(description)
-
-	if len(terms) == 0 {
-		terms = strings.Fields(description)
-		if len(terms) > 5 {
-			terms = terms[:5]
-		}
-	}
-
-	if len(terms) > 6 {
-		terms = terms[:6]
-	}
-	if len(terms) == 0 {
-		fmt.Fprintln(os.Stderr, "no technical terms found in request")
+	result := gather.FromJIRA(a, description)
+	if result.Error != nil || result.Packet == nil {
 		return
 	}
-
-	fmt.Fprintf(os.Stderr, "terms: %s\n", strings.Join(terms, ", "))
-
-	fmt.Fprintln(os.Stderr, "--- Gathering atlas context ---")
-	var atlasData strings.Builder
-
-	for _, term := range terms {
-		result, err := atlasRun(a, "search", term, "--compact")
-		if err != nil || strings.Contains(result, "No matching") {
-			continue
-		}
-		atlasData.WriteString(fmt.Sprintf("### Search: %s\n%s\n", term, result))
-	}
-
-	topTerm := terms[0]
-	if _, structured := a.(atlas.JSONRunner); structured {
-		result, err := atlasRun(a, "ask", topTerm, "--intent", "debug", "--compact")
-		if err == nil && !atlas.IsAmbiguous(result) && !strings.Contains(result, "not found") {
-			atlasData.WriteString(fmt.Sprintf("### Ask (debug): %s\n%s\n", topTerm, result))
-		}
-	} else {
-		investigateResult, err := atlasRun(a, "investigate", topTerm)
-		if err == nil && !strings.Contains(investigateResult, "not found") {
-			atlasData.WriteString(fmt.Sprintf("### Investigate: %s\n%s\n", topTerm, investigateResult))
-		}
-
-		explainResult, err := atlasRun(a, "explain", topTerm)
-		if err == nil && !strings.Contains(explainResult, "not found") {
-			atlasData.WriteString(fmt.Sprintf("### Explain: %s\n%s\n", topTerm, explainResult))
-		}
-	}
-	if strings.TrimSpace(atlasData.String()) == "" {
-		fmt.Fprintln(os.Stderr, "atlas error: no CodeAtlas evidence matched this request; refusing to generate code")
+	ws, err := workingset.FromEvidence(repoPath, result.Packet, atlas.SourceBudget(a))
+	if err != nil || len(ws.ImplFiles) == 0 {
+		fmt.Fprintf(os.Stderr, "atlas error: implementation evidence is unavailable: %v\n", err)
 		return
 	}
-
-	atlasContext := gather.LimitAtlasData(atlasData.String(), 24000)
-	if atlasContext != atlasData.String() {
-		fmt.Fprintf(os.Stderr, "atlas data: %d chars (capped to %d)\n", len(atlasData.String()), len(atlasContext))
+	styleCode := ""
+	if styleFile != "" {
+		styleCode = style.LoadReference(styleFile, result.AtlasData, a.GraphPath())
 	}
-	fmt.Fprintf(os.Stderr, "atlas context: %s\n", metrics.FormatText(metrics.Measure(atlasContext)))
-
-	styleCode := style.LoadReference(styleFile, atlasContext, a.GraphPath())
-
-	fmt.Fprintln(os.Stderr, "--- Generating code ---")
-	var p string
-	if repoPath != "" {
-		ws := workingset.Build(repoPath, atlasContext, "", "", a)
-		if len(ws.ImplFiles) == 0 {
-			fmt.Fprintln(os.Stderr, "atlas error: no graph-selected implementation source was available; refusing to generate code")
-			return
-		}
-		p = prompt.BuildGenerateWithSources(description, atlasContext, styleCode, conventions, toPromptFiles(ws.ImplFiles))
-	} else {
-		p = prompt.BuildGenerate(description, atlasContext, styleCode, conventions)
+	files := append(toPromptFiles(ws.ImplFiles), toPromptFiles(ws.TestFiles)...)
+	p := prompt.BuildGenerateWithSources(description, result.Packet.PromptEvidence(), styleCode, conventions, files)
+	p += "\n\n## API definitions\n" + ws.Types
+	for _, omission := range ws.Omissions {
+		p += "\nSource limitation: " + omission
 	}
 
 	output, err := llm.GenerateString(p)
@@ -118,14 +61,7 @@ func Run(a atlas.Runner, llm ollama.LLM, description, styleFile, conventions, re
 func toPromptFiles(files []workingset.FileContent) []prompt.FileContent {
 	out := make([]prompt.FileContent, len(files))
 	for i, f := range files {
-		out[i] = prompt.FileContent{Path: f.Path, Code: f.Code}
+		out[i] = prompt.FileContent{Path: f.Path, Code: f.Code, Evidence: f.Evidence}
 	}
 	return out
-}
-
-func atlasRun(a atlas.Runner, args ...string) (string, error) {
-	if jr, ok := a.(atlas.JSONRunner); ok {
-		return jr.RunJSON(args...)
-	}
-	return a.Run(args...)
 }

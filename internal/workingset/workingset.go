@@ -18,11 +18,16 @@ type FileContent struct {
 }
 
 type WorkingSet struct {
-	Controller string
-	ImplFiles  []FileContent
-	TestFiles  []FileContent
-	Types      string
-	Functions  []string
+	Controller       string
+	ImplFiles        []FileContent
+	TestFiles        []FileContent
+	DefinitionFiles  []FileContent
+	Types            string
+	Functions        []string
+	TypeFiles        []string
+	Omissions        []string
+	GraphFingerprint string
+	Sources          []atlas.EvidenceSource
 }
 
 func Build(repoPath, atlasData, apiTypes, controllerFile string, a ...atlas.Runner) *WorkingSet {
@@ -95,6 +100,22 @@ func (ws *WorkingSet) TotalChars() int {
 		total += len(f.Code) + len(f.Evidence)
 	}
 	return total
+}
+
+// MaterializedCode contains retained source bytes, excluding selection reasons,
+// headers, and omissions. NUL boundaries keep snippets from matching across
+// separate excerpts; this projection is not used to render prompts.
+func (ws *WorkingSet) MaterializedCode() string {
+	var out strings.Builder
+	for _, files := range [][]FileContent{ws.ImplFiles, ws.TestFiles, ws.DefinitionFiles} {
+		for _, file := range files {
+			if out.Len() > 0 {
+				out.WriteByte(0)
+			}
+			out.WriteString(file.Code)
+		}
+	}
+	return out.String()
 }
 
 var funcEntityPattern = regexp.MustCompile(`function:[a-zA-Z0-9._/@+\-]+`)

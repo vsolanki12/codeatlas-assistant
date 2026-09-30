@@ -61,19 +61,16 @@ func TestExtractControllersReusesRelationshipEvidence(t *testing.T) {
 
 func TestFromJIRAStructuredPathAvoidsCompatibilityExpansion(t *testing.T) {
 	entityID := "controller:example.com/repo/pkg.Reconciler"
+	question := "How does autoRepair work for NodePool?"
+	key := "evidence --question " + question + " --intent debug --budget-bytes 16384"
 	runner := &structuredRunner{responses: map[string]string{
-		"search NodePool --compact":             fmt.Sprintf(`{"entities":[{"id":%q,"name":"Reconciler","kind":"controller","source":{"file":"controllers/reconcile.go","line":3}}]}`, entityID),
-		"ask NodePool --intent debug --compact": fmt.Sprintf(`{"entities":[{"id":%q,"name":"Reconciler","kind":"controller","source":{"file":"controllers/reconcile.go","line":3}}],"relationships":[{"id":"%s--creates--resource:apps/Deployment","from":%q,"to":"resource:apps/Deployment","type":"creates","confidence":"proven","evidence":{"file":"controllers/reconcile.go","line":3}}]}`, entityID, entityID, entityID),
+		key: fmt.Sprintf(`{"version":"1.0","status":"ok","graphFingerprint":"fixture","entities":[{"id":%q,"name":"Reconciler","kind":"controller","source":{"file":"controllers/reconcile.go","line":3}}],"sources":[{"entityID":%q,"role":"implementation","source":{"file":"controllers/reconcile.go","line":3,"endLine":5}}],"relationships":[{"id":"%s--creates--resource:apps/Deployment","from":%q,"to":"resource:apps/Deployment","type":"creates","confidence":"proven","evidence":{"file":"controllers/reconcile.go","line":3}}]}`, entityID, entityID, entityID, entityID),
 	}}
-
-	result := FromJIRA(runner, "NodePool")
-	if len(result.Controllers) != 1 || result.Controllers[0].Role != "workload" {
-		t.Fatalf("unexpected gathered controller result: %+v", result.Controllers)
+	result := FromJIRA(runner, question)
+	if result.Error != nil || result.Packet == nil || len(result.Controllers) != 1 || result.Controllers[0].Role != "workload" {
+		t.Fatalf("unexpected evidence result: %+v", result)
 	}
-	if len(runner.calls) != 2 {
-		t.Fatalf("structured gathering made compatibility expansion calls: %v", runner.calls)
-	}
-	if runner.calls[0] != "search NodePool --compact" || runner.calls[1] != "ask NodePool --intent debug --compact" {
-		t.Fatalf("unexpected structured gathering call sequence: %v", runner.calls)
+	if len(runner.calls) != 1 || runner.calls[0] != key {
+		t.Fatalf("duplicated retrieval policy/calls: %v", runner.calls)
 	}
 }

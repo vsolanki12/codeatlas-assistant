@@ -100,7 +100,7 @@ func EntityRefs(data string) []EntityRef {
 }
 
 func isEntityID(id string) bool {
-	for _, kind := range []string{"controller", "function", "crd", "package", "test", "document", "resource", "template", "operator"} {
+	for _, kind := range []string{"controller", "function", "crd", "package", "test", "document", "resource", "template", "operator", "field"} {
 		if strings.HasPrefix(id, kind+":") {
 			return true
 		}

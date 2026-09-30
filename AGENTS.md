@@ -22,7 +22,7 @@ go build -o assistant ./cmd/assistant/   # Build
 go test ./...                            # Run all tests
 ```
 
-There is no `Makefile`, CI, or Docker configuration — the project builds with standard Go tooling. The module has **zero external Go dependencies** (stdlib only).
+The project builds with standard Go tooling. GitHub checks run formatting, tests, vet, and builds; there is no `Makefile` or Docker configuration. The module has **zero external Go dependencies** (stdlib only).
 
 ### Prerequisites
 

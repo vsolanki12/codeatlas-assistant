@@ -1,0 +1,29 @@
+name: checks
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Formatting
+        run: |
+          git ls-files '*.go' ':!**/testdata/**' | xargs gofmt -l | tee /tmp/assistant-formatting.txt
+          test ! -s /tmp/assistant-formatting.txt
+      - name: Evidence contracts and regressions
+        run: go test -race ./...
+      - name: Static checks
+        run: go vet ./...
+      - name: Build
+        run: go build ./...

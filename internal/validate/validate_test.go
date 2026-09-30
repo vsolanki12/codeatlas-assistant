@@ -22,6 +22,9 @@ func (validationRunner) RunJSON(args ...string) (string, error) {
 	if len(args) >= 2 && args[0] == "ask" && args[1] == "function:example/pkg.Known" {
 		return `{"entity":{"id":"function:example/pkg.Known","name":"Known","kind":"function"}}`, nil
 	}
+	if len(args) >= 2 && args[0] == "ask" && args[1] == "field:example/pkg.Management.AutoRepair" {
+		return `{"entity":{"id":"field:example/pkg.Management.AutoRepair","kind":"field"}}`, nil
+	}
 	if len(args) >= 2 && args[0] == "ask" && args[1] == "Known" {
 		return `{"entity":{"id":"function:example/pkg.Known","name":"Known","kind":"function"}}`, nil
 	}
@@ -176,6 +179,30 @@ func TestExtractAtlasIDsAcceptsTemplateIdentity(t *testing.T) {
 	ids := extractAtlasIDs("use template:kubernetes.deployment@config/deployment.yaml#1 as the unresolved manifest identity")
 	if len(ids) != 1 || ids[0] != "template:kubernetes.deployment@config/deployment.yaml#1" {
 		t.Fatalf("template IDs = %v, want exact template identity", ids)
+	}
+}
+
+func TestOutputChecksMarkdownPathsAndNewFieldIdentities(t *testing.T) {
+	text := "Use `pkg/known.go`, [design](docs/design.md), and field:example/pkg.Management.AutoRepair; avoid `pkg/missing.go` and field:example/pkg.Missing.AutoRepair."
+	result := Output(text, "", validationRunner{})
+	if result.Checked != 5 || len(result.Violations) != 2 {
+		t.Fatalf("wrapped paths or field identities bypassed validation: %+v", result)
+	}
+	if result.Violations[0].Ref != "pkg/missing.go" || result.Violations[1].Ref != "field:example/pkg.Missing.AutoRepair" {
+		t.Fatalf("wrong violations: %+v", result.Violations)
+	}
+}
+
+type maskedEmptyGraphRunner struct{}
+
+func (maskedEmptyGraphRunner) GraphPath() string                 { return "fixture" }
+func (maskedEmptyGraphRunner) Run(...string) (string, error)     { return `{"entities":[]}`, nil }
+func (maskedEmptyGraphRunner) RunJSON(...string) (string, error) { return `{"entities":[]}`, nil }
+
+func TestOutputNeverAcceptsEmptyJSONAsNonemptyTextEvidence(t *testing.T) {
+	result := Output("Inspect `pkg/invented.go`.", "", maskedEmptyGraphRunner{})
+	if result.OK() || result.Checked != 1 {
+		t.Fatalf("empty structured graph was accepted through text fallback: %+v", result)
 	}
 }
 

@@ -30,10 +30,22 @@ type Client struct {
 	Path string
 	// Binary optionally selects the Atlas executable. When empty, CODEATLAS_BIN
 	// is used, then the "atlas" executable resolved through PATH.
-	Binary string
+	Binary         string
+	evidenceBudget int
+	sourceBudget   int
 
 	usageMu sync.RWMutex
 	usage   Usage
+}
+
+// SetContextBudgets configures this client's retrieval and source budgets.
+// Call it before issuing requests; zero uses the shared defaults.
+func (c *Client) SetContextBudgets(evidence, source int) {
+	c.evidenceBudget, c.sourceBudget = evidence, source
+}
+
+func (c *Client) ContextBudgets() (int, int) {
+	return c.evidenceBudget, c.sourceBudget
 }
 
 // Usage records the deterministic Atlas calls made by one assistant process.
