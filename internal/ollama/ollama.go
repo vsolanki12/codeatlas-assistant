@@ -3,6 +3,7 @@ package ollama
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +11,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/vsolanki12/codeatlas-assistant/internal/metrics"
 )
@@ -115,109 +115,84 @@ func ListModels() ([]string, error) {
 	return models, nil
 }
 
+// Generate streams the model response to stdout as it arrives.
 func (c *Client) Generate(prompt string) error {
-	req := request{
+	_, err := c.generate(context.Background(), prompt, os.Stdout)
+	if err == nil {
+		fmt.Println()
+	}
+	return err
+}
+
+// GenerateString collects the model response instead of streaming it.
+func (c *Client) GenerateString(prompt string) (string, error) {
+	return c.generate(context.Background(), prompt, nil)
+}
+
+// GenerateContext streams to echo, if non-nil, and honours cancellation.
+func (c *Client) GenerateContext(ctx context.Context, prompt string, echo io.Writer) (string, error) {
+	return c.generate(ctx, prompt, echo)
+}
+
+// generate performs one streaming request. echo receives each chunk as it
+// arrives; a nil echo collects silently. The response is always returned so
+// callers never have to choose between streaming and keeping the text.
+func (c *Client) generate(ctx context.Context, prompt string, echo io.Writer) (string, error) {
+	body, err := json.Marshal(request{
 		Model:   c.Model,
 		Prompt:  prompt,
 		Stream:  true,
 		Options: c.options(),
-	}
-
-	body, err := json.Marshal(req)
+	})
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	fmt.Fprintf(os.Stderr, "prompt size: %s\n", metrics.FormatText(metrics.Measure(prompt)))
 	c.setUsage(prompt, "", 0, 0)
 
-	client := &http.Client{Timeout: 30 * time.Minute}
-	resp, err := client.Post(
-		baseURL()+"/api/generate",
-		"application/json",
-		bytes.NewBuffer(body),
-	)
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL()+"/api/generate", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("cannot connect to ollama (is it running?): %w", err)
+		return "", err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+
+	// No client-side deadline: a long local generation is normal and the
+	// caller's context is what decides when to stop.
+	resp, err := http.DefaultClient.Do(httpRequest)
+	if err != nil {
+		return "", fmt.Errorf("cannot connect to ollama (is it running?): %w", err)
 	}
 	defer resp.Body.Close()
 
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 	var output strings.Builder
 	var promptTokens, outputTokens int
-	for scanner.Scan() {
+	// A streamed chunk is one JSON object per line and can exceed the default
+	// scanner limit, which would silently truncate the response.
+	decoder := json.NewDecoder(bufio.NewReaderSize(resp.Body, 64*1024))
+	for {
 		var chunk response
-		if err := json.Unmarshal(scanner.Bytes(), &chunk); err != nil {
-			continue
+		if decodeErr := decoder.Decode(&chunk); decodeErr == io.EOF {
+			break
+		} else if decodeErr != nil {
+			c.setUsage(prompt, output.String(), promptTokens, outputTokens)
+			c.printUsage()
+			return "", decodeErr
 		}
-		fmt.Fprint(os.Stdout, chunk.Response)
+		if echo != nil {
+			fmt.Fprint(echo, chunk.Response)
+		}
 		output.WriteString(chunk.Response)
 		if chunk.Done {
 			promptTokens = chunk.PromptEvalCount
 			outputTokens = chunk.EvalCount
-			fmt.Println()
 			break
 		}
 	}
 
 	c.setUsage(prompt, output.String(), promptTokens, outputTokens)
 	c.printUsage()
-	return scanner.Err()
-}
-
-func (c *Client) GenerateString(prompt string) (string, error) {
-	req := request{
-		Model:   c.Model,
-		Prompt:  prompt,
-		Stream:  true,
-		Options: c.options(),
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return "", err
-	}
-
-	fmt.Fprintf(os.Stderr, "prompt size: %s\n", metrics.FormatText(metrics.Measure(prompt)))
-	c.setUsage(prompt, "", 0, 0)
-
-	client := &http.Client{Timeout: 30 * time.Minute}
-	resp, err := client.Post(
-		baseURL()+"/api/generate",
-		"application/json",
-		bytes.NewBuffer(body),
-	)
-	if err != nil {
-		return "", fmt.Errorf("cannot connect to ollama (is it running?): %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result strings.Builder
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	var promptTokens, outputTokens int
-	for scanner.Scan() {
-		var chunk response
-		if err := json.Unmarshal(scanner.Bytes(), &chunk); err != nil {
-			continue
-		}
-		result.WriteString(chunk.Response)
-		if chunk.Done {
-			promptTokens = chunk.PromptEvalCount
-			outputTokens = chunk.EvalCount
-			break
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		c.setUsage(prompt, result.String(), promptTokens, outputTokens)
-		c.printUsage()
-		return "", err
-	}
-	c.setUsage(prompt, result.String(), promptTokens, outputTokens)
-	c.printUsage()
-	return result.String(), nil
+	return output.String(), nil
 }
 
 func (c *Client) setUsage(prompt, output string, promptTokens, outputTokens int) {

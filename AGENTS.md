@@ -93,4 +93,4 @@ The embedded prompt defaults are repository-neutral. The root `conventions.md` i
 
 ## Companion Project
 
-[CodeAtlas](https://github.com/vsolanki12/codeatlas) is the upstream dependency — it provides the `atlas` CLI and builds the graph that this assistant queries. Changes to atlas CLI output format, graph schema, or command flags may require updates here. The [check-repos skill](.claude/skills/check-repos/SKILL.md) can verify both repos are in sync.
+[CodeAtlas](https://github.com/vsolanki12/codeatlas) is the upstream dependency — it provides the `atlas` CLI and builds the graph that this assistant queries. Changes to atlas CLI output format, graph schema, or command flags may require updates here. The graph schema check in `internal/atlas/freshness.go` accepts a range (`MinimumSchemaVersion` through `CurrentSchemaVersion`) rather than one exact version, so an additive upstream bump does not need a lockstep release here; raise `MinimumSchemaVersion` only when a field this assistant depends on is removed or changes meaning. The [check-repos skill](.claude/skills/check-repos/SKILL.md) can verify both repos are in sync.

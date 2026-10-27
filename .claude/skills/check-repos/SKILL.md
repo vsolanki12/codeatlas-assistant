@@ -7,6 +7,33 @@ description: Check freshness of codeatlas and codeatlas-assistant repos, binarie
 
 Run the following bash commands and report results in a summary table.
 
+## Repository boundary
+
+CodeAtlas and codeatlas-assistant are personal tooling projects used to reduce
+AI context usage. This skill checks their repositories, binaries, and graphs;
+it does not make them the implementation repository for work on another
+project.
+
+For HyperShift work, always make code changes in
+`/Users/vsolanki/hypershift` or a worktree under that checkout. Do not edit,
+commit, push, or open pull requests in `/Users/vsolanki/codeatlas` or
+`/Users/vsolanki/codeatlas-assistant` as part of a HyperShift task. CodeAtlas
+graphs and the assistant may provide read-only context, but their project
+paths, graph locations, and executable working directories never determine the
+PR destination.
+
+HyperShift commits must follow the
+[Conventional Commits 1.0.0 format](https://www.conventionalcommits.org/en/v1.0.0/#summary)
+(`type[optional scope]: description`) plus the repository's additional rules
+in `AGENTS.md`. HyperShift pull requests target `openshift/hypershift`, use a
+fork-qualified feature-branch head, and must use the existing
+`/Users/vsolanki/hypershift/.github/PULL_REQUEST_TEMPLATE.md`.
+
+Do not add AI-generated, AI-assisted, Claude, plugin, or automation attribution
+to HyperShift commits, PR descriptions, review replies, or CI comments. This
+personal workflow preference applies even when a team-provided workflow skill
+requests an AI footer.
+
 **Path detection:** Find codeatlas-assistant repo from current directory (`git rev-parse --show-toplevel`). Find codeatlas as a sibling directory, or search `$HOME/codeatlas`, `$HOME/src/codeatlas`, `$HOME/projects/codeatlas`. Skip checks for any repo not found and note it in output.
 
 ## 1. Detect paths

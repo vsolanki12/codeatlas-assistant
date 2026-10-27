@@ -3,8 +3,9 @@
 For coordinated setup, scoped evidence retrieval, provenance checks, and
 measurement limits, see the upstream [shared evidence workflow](https://github.com/vsolanki12/codeatlas/blob/main/docs/evidence-workflow.md).
 Question, solve, generate, and Claude modes consume the version 1.0 Atlas
-evidence manifest. Rebuild Atlas and rescan repositories with schema 1.6.0
-before using these modes. Missing or incompatible evidence blocks model calls.
+evidence manifest. Rebuild Atlas and rescan repositories with a supported
+graph schema (1.6.0 through 1.8.0) before using these modes. Missing or
+incompatible evidence blocks model calls.
 
 Use `--benchmark-fixtures benchmarks/hypershift-autorepair.json --repo /path/to/hypershift`
 to check required implementation, API, and test evidence under several packet
@@ -67,9 +68,13 @@ against the same checkout and graph:
 atlas verify --graph graph.json --repo ~/your-repo
 ```
 
-The assistant also rejects missing or non-current CodeAtlas schema metadata for
-implementation and review workflows. A complete parser scan can still have
-partial type resolution; the evidence prompt preserves those extraction limits.
+The assistant also rejects missing or unsupported CodeAtlas schema metadata
+for implementation and review workflows. The check is a range — same major
+version, at least `MinimumSchemaVersion` — because CodeAtlas adds optional
+fields within a major version. An exact-match pin made every upstream schema
+bump block every assistant mode until this repository was edited in lockstep.
+A complete parser scan can still have partial type resolution; the evidence
+prompt preserves those extraction limits.
 
 This keeps the assistant from becoming a second repository-analysis engine:
 Atlas extracts and retrieves facts; the model explains them, identifies

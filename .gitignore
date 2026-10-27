@@ -1,1 +1,11 @@
 /assistant
+/atlas-assistant
+
+# Per-issue artifacts written into the working directory by solve and claude
+# modes. They are outputs of a run, not sources.
+/*-claude.xml
+/*-claude-manifest.json
+/JIRA_*.txt
+/OCPBUGS-*.md
+/OCPSTART-*.md
+/jira-description/

@@ -157,7 +157,7 @@ func TestFreshnessPromptContextIncludesVerificationLimits(t *testing.T) {
 func TestParseFreshnessIncludesCoverage(t *testing.T) {
 	r := &jsonMockRunner{json: `{"available":true,"graphRepository":"/repo","repository":"/repo","graphCommit":"abc","repoHead":"abc","schemaVersion":"1.6.0","schemaCurrent":true,"extractorCurrent":true,"extractionSignature":"fixture","entityIdentity":"repository-path-v1","scanComplete":true,"scanWarnings":["yaml: warning"],"repositoryMatch":true,"verifiable":true,"stale":false,"dirty":false,"stateVerifiable":true,"scanCoverage":{"discovered":8,"parsed":7,"reused":1}}`}
 	f, ok := parseFreshness(r, "/repo")
-	if !ok || f.SchemaVersion != CurrentSchemaVersion || !f.SchemaCurrent || f.ScanCoverage == nil || f.ScanCoverage.Discovered != 8 || f.ScanCoverage.Reused != 1 || len(f.ScanWarnings) != 1 {
+	if !ok || f.SchemaVersion != MinimumSchemaVersion || !f.SchemaCurrent || f.ScanCoverage == nil || f.ScanCoverage.Discovered != 8 || f.ScanCoverage.Reused != 1 || len(f.ScanWarnings) != 1 {
 		t.Fatalf("freshness = %+v, ok=%v", f, ok)
 	}
 }
@@ -182,5 +182,20 @@ func TestShort(t *testing.T) {
 	}
 	if short("0123456789abcdef") != "0123456789" {
 		t.Errorf("short should truncate to 10, got %q", short("0123456789abcdef"))
+	}
+}
+
+// The Assistant must read any graph within its supported major version.
+// Pinning to one exact version made every upstream schema bump an outage.
+func TestSchemaSupportedAcceptsARange(t *testing.T) {
+	for _, supported := range []string{MinimumSchemaVersion, CurrentSchemaVersion, "1.7.0", "1.99.3"} {
+		if !schemaSupported(supported) {
+			t.Errorf("schema %s should be supported", supported)
+		}
+	}
+	for _, unsupported := range []string{"1.5.0", "0.9.0", "2.0.0", "", "nonsense", "1"} {
+		if schemaSupported(unsupported) {
+			t.Errorf("schema %q should not be supported", unsupported)
+		}
 	}
 }

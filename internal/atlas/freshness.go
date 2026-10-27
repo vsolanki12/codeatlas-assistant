@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -29,10 +30,47 @@ type Freshness struct {
 	Available           bool
 }
 
-// CurrentSchemaVersion is the graph contract supported by this Assistant.
-// Keeping the version check at the consumer boundary prevents an older graph
-// from silently omitting fields used by routing and validation.
-const CurrentSchemaVersion = "1.6.0"
+// MinimumSchemaVersion is the oldest graph contract this Assistant can read.
+// CurrentSchemaVersion names the newest contract it was written against.
+//
+// The check is a range, not an equality. CodeAtlas adds optional fields within
+// a major version, so an exact match made every upstream schema bump block
+// every Assistant mode until this constant was edited in lockstep — a release
+// coupling that produced outages rather than safety.
+const (
+	MinimumSchemaVersion = "1.6.0"
+	CurrentSchemaVersion = "1.8.0"
+)
+
+// schemaSupported reports whether a graph schema is within the supported
+// range: same major version, and at least the minimum minor version.
+func schemaSupported(version string) bool {
+	major, minor, ok := parseSchemaVersion(version)
+	if !ok {
+		return false
+	}
+	minMajor, minMinor, ok := parseSchemaVersion(MinimumSchemaVersion)
+	if !ok {
+		return false
+	}
+	return major == minMajor && minor >= minMinor
+}
+
+func parseSchemaVersion(version string) (int, int, bool) {
+	parts := strings.Split(strings.TrimSpace(version), ".")
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, false
+	}
+	return major, minor, true
+}
 
 // ScanCoverage mirrors the small, stable coverage summary emitted by
 // CodeAtlas. The assistant reports it as metadata; it never treats ignored
@@ -70,7 +108,7 @@ func (f Freshness) Warning() string {
 		return "graph schema version is unavailable — rescan before relying on implementation guidance"
 	}
 	if !f.SchemaCurrent {
-		return fmt.Sprintf("graph schema %s is not current — rescan with CodeAtlas schema %s", f.SchemaVersion, CurrentSchemaVersion)
+		return fmt.Sprintf("graph schema %s is not supported — rescan with CodeAtlas schema %s (minimum %s)", f.SchemaVersion, CurrentSchemaVersion, MinimumSchemaVersion)
 	}
 	if !f.ExtractorCurrent || f.ExtractionSignature == "" {
 		return "graph extractor provenance is missing or incompatible — perform a full scan with the current CodeAtlas extractor"
@@ -210,7 +248,7 @@ func CheckFreshness(a Runner, repoPath string) Freshness {
 		RepoHead:        head,
 		GraphRepository: meta.Repository,
 		SchemaVersion:   meta.SchemaVersion,
-		SchemaCurrent:   meta.SchemaVersion == CurrentSchemaVersion,
+		SchemaCurrent:   schemaSupported(meta.SchemaVersion),
 		EntityIdentity:  meta.EntityIdentity,
 		ScanCoverage:    meta.ScanCoverage,
 		ScanWarnings:    append([]string(nil), meta.ScanWarnings...),
@@ -276,7 +314,7 @@ func parseFreshness(a JSONRunner, repoPath string) (Freshness, bool) {
 		RepoHead:            value.RepoHead,
 		GraphRepository:     value.GraphRepository,
 		SchemaVersion:       value.SchemaVersion,
-		SchemaCurrent:       value.SchemaVersion == CurrentSchemaVersion,
+		SchemaCurrent:       schemaSupported(value.SchemaVersion),
 		ExtractorCurrent:    value.ExtractorCurrent,
 		ExtractionSignature: value.ExtractionSignature,
 		EntityIdentity:      value.EntityIdentity,
